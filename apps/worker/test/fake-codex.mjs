@@ -57,6 +57,16 @@ async function runTurn(thread, turn, text, clientId) {
   notify("item/completed", { ...t, item: user });
   turn.items.push(user);
 
+  if (text.startsWith("image:")) {
+    const image = { type: "imageView", id: id("image"), path: text.slice(6) };
+    notify("item/started", { ...t, item: image });
+    notify("item/completed", { ...t, item: image });
+    turn.items.push(image);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    // Completion can be replayed after the original temporary file has gone.
+    notify("item/completed", { ...t, item: image });
+  }
+
   if (text.includes("fail")) return finish(thread, turn, "failed", { message: "simulated failure" });
   if (text.includes("approve")) {
     const cmd = {

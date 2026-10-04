@@ -1,3 +1,4 @@
+export * from "./conversation-images.ts";
 export * from "./exec.ts";
 export * from "./git.ts";
 export * from "./project-config.ts";

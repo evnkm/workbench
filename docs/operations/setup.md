@@ -86,6 +86,7 @@ To run an untested version anyway, temporarily set `WORKBENCH_CODEX_ALLOW_UNTEST
 | Included | Not included |
 | --- | --- |
 | Application database (a consistent `VACUUM INTO` copy) | Credentials: `~/.codex/auth.json`, `~/.config/workbench/env` |
+| Retained conversation images | Remote images hosted outside Workbench |
 | Codex databases, session files, and `config.toml` (needed to resume threads) | Run logs and artifacts, unless you pass `--with-runs` |
 | Each workspace's uncommitted tracked changes (binary patch) and untracked files | Ignored files such as `node_modules` and `.env` in worktrees |
 

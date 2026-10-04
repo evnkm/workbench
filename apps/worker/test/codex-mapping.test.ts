@@ -93,3 +93,74 @@ test("shell wrappers are removed for display", () => {
   assert.equal(unwrapShell(`/bin/bash -lc "pwd && rg -g 'x'"`), "pwd && rg -g 'x'");
   assert.equal(unwrapShell("ls -la"), "ls -la");
 });
+
+test("Codex image views and function images keep their source and accompanying text", () => {
+  const view = mapItem({ type: "imageView", id: "view", path: "file:///tmp/screen.png" }, true);
+  assert.equal(view.kind, "image");
+  assert.deepEqual(view.data.images, [{ source: "file:///tmp/screen.png", alt: "Viewed image" }]);
+  const output = mapItem(
+    {
+      type: "functionCallOutput",
+      id: "tool",
+      name: "capture",
+      namespace: null,
+      output: [
+        { type: "input_text", text: "Screenshot captured" },
+        { type: "input_image", image_url: "data:image/png;base64,eA==" },
+      ],
+    },
+    true,
+  );
+  assert.equal(output.kind, "tool_call");
+  assert.equal(output.data.images?.[0]?.source, "data:image/png;base64,eA==");
+  assert.deepEqual(output.data.result, [{ type: "input_text", text: "Screenshot captured" }]);
+});
+
+test("MCP and dynamic tool images are separated from bounded text results", () => {
+  const mcp = mapItem(
+    {
+      type: "mcpToolCall",
+      id: "mcp",
+      server: "browser",
+      tool: "capture",
+      status: "completed",
+      arguments: {},
+      appContext: null,
+      mcpAppUi: null,
+      pluginId: null,
+      readOnlyHint: true,
+      error: null,
+      durationMs: null,
+      result: {
+        content: [
+          { type: "text", text: "Captured" },
+          { type: "image", data: "eA==", mimeType: "image/png" },
+        ],
+        structuredContent: null,
+        _meta: null,
+      },
+    },
+    true,
+  );
+  assert.deepEqual(mcp.data.result, [{ type: "text", text: "Captured" }]);
+  assert.equal(mcp.data.images?.[0]?.source, "data:image/png;base64,eA==");
+  const dynamic = mapItem(
+    {
+      type: "dynamicToolCall",
+      id: "dynamic",
+      namespace: null,
+      tool: "capture",
+      arguments: {},
+      status: "completed",
+      success: true,
+      durationMs: null,
+      contentItems: [
+        { type: "inputText", text: "Captured" },
+        { type: "inputImage", imageUrl: "data:image/png;base64,eA==" },
+      ],
+    },
+    true,
+  );
+  assert.equal(dynamic.data.images?.[0]?.source, "data:image/png;base64,eA==");
+  assert.deepEqual(dynamic.data.result, [{ type: "inputText", text: "Captured" }]);
+});

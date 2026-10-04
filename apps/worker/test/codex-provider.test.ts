@@ -1,7 +1,10 @@
 // Provider lifecycle against the scripted fake app-server (fake-codex.mjs).
 import assert from "node:assert/strict";
+import { rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { after, test } from "node:test";
 import { getRun, listItems } from "@workbench/db";
+import { readRetainedImage } from "@workbench/runtime";
 import { CodexProvider } from "../src/codex/provider.ts";
 import { Workspaces } from "../src/workspaces.ts";
 import { makeContext, makeRepo, waitFor } from "./helpers.ts";
@@ -37,6 +40,29 @@ test("a turn streams items and records success; the user message is not duplicat
     ["user_message", "agent_message"],
   );
   assert.equal(items[1]!.data.text, "Done.");
+});
+
+test("image completion replay preserves retained screenshots after their temporary file disappears", async () => {
+  const { ctx, codex, conv } = await setup();
+  const conversationId = await conv();
+  const source = join(ctx.config.stateDir, "screenshot.png");
+  const bytes = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  writeFileSync(source, bytes);
+  const { runId } = await codex.submitTurn({ conversationId, text: `image:${source}`, mode: "default" });
+  const first = await waitFor(() =>
+    listItems(ctx.db, conversationId, null, 100).items.find(
+      (item) => item.kind === "image" && item.data.images?.[0]?.mediaId,
+    ),
+  );
+  rmSync(source);
+  await waitFor(() => runState(ctx, runId) === "succeeded");
+  const replay = listItems(ctx.db, conversationId, null, 100).items.find((item) => item.id === first.id)!;
+  assert.equal(replay.data.images?.[0]?.mediaId, first.data.images?.[0]?.mediaId);
+  assert.equal(replay.data.images?.[0]?.error, undefined);
+  assert.deepEqual(readRetainedImage(ctx.config.stateDir, replay.data.images![0]!.mediaId!).bytes, bytes);
 });
 
 test("an approval is answered once; a second answer is rejected as stale", async () => {

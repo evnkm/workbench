@@ -29,6 +29,7 @@ import {
   updateConversation,
   updateRun,
 } from "@workbench/db";
+import { markdownImages, retainImages } from "@workbench/runtime";
 import { CommandError, type Handlers } from "../commands.ts";
 import type { WorkerContext } from "../context.ts";
 import { exec, sleep } from "../util.ts";
@@ -636,6 +637,19 @@ export class CodexProvider {
     if (!existing && mapped.clientId) {
       const mine = getItem(db, mapped.clientId);
       if (mine && mine.conversationId === conv.id) existing = mine;
+    }
+    if (completed) {
+      const images = [...(mapped.data.images ?? []), ...markdownImages(mapped.data.text ?? "")].map((image) => {
+        const retained = existing?.data.images?.find((saved) => saved.source === image.source && saved.mediaId);
+        return retained ? { ...image, mediaId: retained.mediaId } : image;
+      });
+      if (images.length) {
+        mapped.data.images = retainImages(
+          this.ctx.config.stateDir,
+          getWorkspace(db, conv.workspaceId)!.worktreePath,
+          images,
+        );
+      }
     }
     if (completed) this.deltas.delete(existing?.id ?? "");
     // Keep Workbench's own fields (such as the plan-mode marker) on the user message.

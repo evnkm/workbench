@@ -83,6 +83,7 @@ export type ItemKind =
   | "tool_call"
   | "plan"
   | "web_search"
+  | "image"
   | "notice"
   | "other";
 
@@ -90,8 +91,17 @@ export type ItemStatus = "in_progress" | "completed" | "failed" | "declined" | n
 
 export type FileChange = { path: string; kind: "add" | "delete" | "update"; movePath: string | null; diff: string };
 
+export type ConversationImage = {
+  source: string;
+  alt: string;
+  /** Content-addressed file in Workbench's retained media directory. */
+  mediaId?: string;
+  error?: string;
+};
+
 /** Kind-specific item payload. Fields are optional because providers differ. */
 export type ItemData = {
+  images?: ConversationImage[];
   text?: string;
   /** agent_message phase, for example commentary or final_answer. */
   phase?: string | null;

@@ -35,6 +35,9 @@ const manifest: Record<string, unknown> = { createdAt: new Date().toISOString(),
 const db = new Database(config.dbPath);
 db.backupTo(join(out, "workbench.sqlite"));
 manifest.schemaVersion = db.get<{ user_version: number }>("PRAGMA user_version")!.user_version;
+// Conversation media is durable state, independent of optional job artifacts.
+if (existsSync(join(config.stateDir, "media")))
+  cpSync(join(config.stateDir, "media"), join(out, "media"), { recursive: true });
 
 // 2. Codex provider state.
 const codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex");

@@ -12,6 +12,7 @@ import {
   getArtifact,
   getCommand,
   getConversation,
+  getItem,
   getJobRunRow,
   getProcess,
   getProject,
@@ -34,8 +35,18 @@ import {
   listProjects,
   listWorkspaces,
   oldestSeq,
+  saveItem,
 } from "@workbench/db";
-import { fileDiff, status as gitStatus, nextOccurrences, portFor, readProjectConfig } from "@workbench/runtime";
+import {
+  fileDiff,
+  status as gitStatus,
+  markdownImages,
+  nextOccurrences,
+  portFor,
+  readProjectConfig,
+  readRetainedImage,
+  retainImages,
+} from "@workbench/runtime";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { Auth } from "./auth.ts";
@@ -138,6 +149,37 @@ export function createApp({ db, config, auth, link, log, previews, extend }: App
   app.get("/api/runs/:id", (c) => {
     const run = getRun(db, c.req.param("id"));
     return run ? c.json(run) : c.json({ error: "Run not found." }, 404);
+  });
+
+  // Only serve image sources actually attached to this stored conversation item.
+  app.get("/api/items/:id/image", (c) => {
+    const item = getItem(db, c.req.param("id"));
+    const source = c.req.query("source");
+    if (!item || !source) return c.json({ error: "Image not found." }, 404);
+    const images = item.data.images ?? [];
+    const referenced =
+      images.find((image) => image.source === source) ??
+      markdownImages(item.data.text ?? "").find((image) => image.source === source);
+    if (!referenced) return c.json({ error: "Image not found." }, 404);
+    const conv = getConversation(db, item.conversationId)!;
+    const workspace = getWorkspace(db, conv.workspaceId)!;
+    const retained = retainImages(config.stateDir, workspace.worktreePath, [referenced])[0]!;
+    if (!retained.mediaId) return c.json({ error: retained.error ?? "Image is unavailable." }, 404);
+    if (!referenced.mediaId && item.status === "completed") {
+      saveItem(db, {
+        ...item,
+        data: { ...item.data, images: [...images.filter((image) => image.source !== source), retained] },
+      });
+    }
+    try {
+      const image = readRetainedImage(config.stateDir, retained.mediaId);
+      c.header("Content-Type", image.contentType);
+      c.header("X-Content-Type-Options", "nosniff");
+      c.header("Cache-Control", "private, no-cache");
+      return c.body(new Uint8Array(image.bytes));
+    } catch {
+      return c.json({ error: "Retained image is unavailable." }, 404);
+    }
   });
 
   /** Bounded read of a run's output log, from `offset` (or the last 64 KiB). */

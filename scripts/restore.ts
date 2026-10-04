@@ -34,6 +34,7 @@ if (existsSync(dbTarget)) {
 }
 mkdirSync(target, { recursive: true });
 cpSync(join(src, "workbench.sqlite"), dbTarget);
+if (existsSync(join(src, "media"))) cpSync(join(src, "media"), join(target, "media"), { recursive: true });
 const db = new Database(dbTarget);
 console.log(`Database restored (schema ${db.migrate()}).`);
 

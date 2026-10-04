@@ -2,6 +2,7 @@
 // provider-neutral conversation model. Covered by test/codex-mapping.test.ts
 // using the recorded transcripts in probes/codex/samples.
 import type {
+  ConversationImage,
   FileChange,
   InputKind,
   InputQuestion,
@@ -46,7 +47,14 @@ export function mapItem(item: ThreadItem, completed: boolean): MappedItem {
           c.type === "text" ? c.text : c.type === "mention" || c.type === "skill" ? `@${c.name}` : `[${c.type}]`,
         )
         .join("\n");
-      return { kind: "user_message", status: "completed", data: { text }, clientId: item.clientId };
+      const images = item.content.flatMap((content): ConversationImage[] =>
+        content.type === "localImage"
+          ? [{ source: content.path, alt: "Attached image" }]
+          : content.type === "image" && "url" in content
+            ? [{ source: content.url, alt: "Attached image" }]
+            : [],
+      );
+      return { kind: "user_message", status: "completed", data: { text, images }, clientId: item.clientId };
     }
     case "agentMessage":
       return { kind: "agent_message", status: done, data: { text: item.text, phase: item.phase ?? null } };
@@ -92,7 +100,8 @@ export function mapItem(item: ThreadItem, completed: boolean): MappedItem {
           tool: item.tool,
           server: item.server,
           arguments: item.arguments,
-          result: item.result ? clipJson(item.result.content) : null,
+          images: mcpImages(item.result?.content ?? []),
+          result: item.result ? clipJson(item.result.content.filter((content) => !isMcpImage(content))) : null,
           error: item.error?.message ?? null,
           durationMs: item.durationMs,
         },
@@ -100,8 +109,57 @@ export function mapItem(item: ThreadItem, completed: boolean): MappedItem {
     case "dynamicToolCall":
       return {
         kind: "tool_call",
-        status: status(item.status),
-        data: { tool: item.tool, server: item.namespace, arguments: item.arguments, durationMs: item.durationMs },
+        status: item.success === false ? "failed" : status(item.status),
+        data: {
+          tool: item.tool,
+          server: item.namespace,
+          arguments: item.arguments,
+          durationMs: item.durationMs,
+          images: (item.contentItems ?? []).flatMap((content) =>
+            content.type === "inputImage" ? [{ source: content.imageUrl, alt: "Tool image" }] : [],
+          ),
+          result: clipJson((item.contentItems ?? []).filter((content) => content.type === "inputText")),
+        },
+      };
+    case "functionCallOutput":
+      return {
+        kind: "tool_call",
+        status: done,
+        data: {
+          tool: item.name,
+          server: item.namespace,
+          result:
+            typeof item.output === "string"
+              ? clip(item.output, MAX_OUTPUT_CHARS)
+              : clipJson(item.output.filter((content) => content.type === "input_text")),
+          images:
+            typeof item.output === "string"
+              ? []
+              : item.output.flatMap((content) =>
+                  content.type === "input_image" && "image_url" in content
+                    ? [{ source: content.image_url, alt: "Tool image" }]
+                    : [],
+                ),
+        },
+      };
+    case "imageView":
+      return { kind: "image", status: done, data: { images: [{ source: item.path, alt: "Viewed image" }] } };
+    case "imageGeneration":
+      return {
+        kind: "image",
+        status: item.failure ? "failed" : done,
+        data: {
+          images:
+            item.savedPath || item.result
+              ? [
+                  {
+                    source: item.savedPath ?? `data:image/png;base64,${item.result}`,
+                    alt: item.revisedPrompt ?? "Generated image",
+                  },
+                ]
+              : [],
+          error: item.failure ? "Image generation failed." : null,
+        },
       };
     case "webSearch":
       return { kind: "web_search", status: done, data: { query: (item as { query?: string }).query ?? "" } };
@@ -114,6 +172,25 @@ export function mapItem(item: ThreadItem, completed: boolean): MappedItem {
     default:
       return { kind: "other", status: done, data: { providerType: item.type } };
   }
+}
+
+function isMcpImage(value: unknown): value is { type: "image"; data: string; mimeType: string } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "type" in value &&
+    value.type === "image" &&
+    "data" in value &&
+    typeof value.data === "string" &&
+    "mimeType" in value &&
+    typeof value.mimeType === "string"
+  );
+}
+
+function mcpImages(content: unknown[]): ConversationImage[] {
+  return content
+    .filter(isMcpImage)
+    .map((image) => ({ source: `data:${image.mimeType};base64,${image.data}`, alt: "Tool image" }));
 }
 
 /** Codex wraps commands as `/bin/bash -lc '<cmd>'` (or double-quoted); show the inner command. */

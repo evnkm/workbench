@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { nowIso, uuidv7 } from "@workbench/contracts";
-import { createLogger, Database, loadConfig, saveProject } from "@workbench/db";
+import {
+  createLogger,
+  Database,
+  getItem,
+  loadConfig,
+  saveConversation,
+  saveItem,
+  saveProject,
+  saveWorkspace,
+} from "@workbench/db";
 import { createApp } from "../src/app.ts";
 import { Auth, hashPassword } from "../src/auth.ts";
 import { WorkerLink } from "../src/worker-link.ts";
@@ -44,7 +53,7 @@ function setup() {
     assert.equal(r.status, 200);
     return r.headers.get("set-cookie")!.split(";")[0]!;
   };
-  return { db, call, login };
+  return { db, call, login, config };
 }
 
 test("unauthenticated requests cannot read state, send commands, or subscribe", async () => {
@@ -169,4 +178,81 @@ test("the worker link survives a stale socket file and a vanished worker", async
   await new Promise((r) => setTimeout(r, 2500)); // several reconnect attempts
   assert.equal(link.connected, false);
   link.close();
+});
+
+test("conversation images require auth and a stored image reference, and survive source deletion", async () => {
+  const { db, call, login, config } = setup();
+  const now = nowIso();
+  const projectId = uuidv7(),
+    workspaceId = uuidv7(),
+    conversationId = uuidv7(),
+    itemId = uuidv7();
+  saveProject(db, {
+    id: projectId,
+    name: "Images",
+    repoPath: config.stateDir,
+    defaultBranch: "main",
+    setupCommand: null,
+    runCommand: null,
+    createdAt: now,
+    updatedAt: now,
+  });
+  saveWorkspace(db, {
+    id: workspaceId,
+    projectId,
+    name: "Images",
+    branch: "main",
+    baseRef: "main",
+    worktreePath: config.stateDir,
+    state: "ready",
+    error: null,
+    setupExitCode: null,
+    portBase: null,
+    createdAt: now,
+    updatedAt: now,
+    archivedAt: null,
+  });
+  saveConversation(db, {
+    id: conversationId,
+    workspaceId,
+    provider: "codex",
+    providerThreadId: null,
+    title: "Images",
+    model: null,
+    approvalPolicy: "never",
+    createdAt: now,
+    updatedAt: now,
+    lastActivityAt: now,
+  });
+  const path = join(config.stateDir, "screen.png");
+  const bytes = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  writeFileSync(path, bytes);
+  saveItem(db, {
+    id: itemId,
+    conversationId,
+    runId: null,
+    providerItemId: null,
+    kind: "agent_message",
+    status: "completed",
+    data: { text: `![Screenshot](${path})\n\n\`\`\`md\n![Example](/tmp/private.png)\n\`\`\`` },
+    createdAt: now,
+    updatedAt: now,
+  });
+  const url = `/api/items/${itemId}/image?source=${encodeURIComponent(path)}`;
+  assert.equal((await call(url)).status, 401);
+  const cookie = await login();
+  assert.equal((await call(`/api/items/${itemId}/image?source=/tmp/private.png`, { cookie })).status, 404);
+  const first = await call(url, { cookie });
+  assert.equal(first.status, 200);
+  assert.equal(first.headers.get("content-type"), "image/png");
+  assert.equal(first.headers.get("x-content-type-options"), "nosniff");
+  assert.deepEqual(Buffer.from(await first.arrayBuffer()), bytes);
+  assert.ok(getItem(db, itemId)!.data.images?.[0]?.mediaId);
+  rmSync(path);
+  const replay = await call(url, { cookie });
+  assert.equal(replay.status, 200);
+  assert.deepEqual(Buffer.from(await replay.arrayBuffer()), bytes);
 });
