@@ -1,0 +1,11 @@
+{
+  "name": "@workbench/db",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@workbench/contracts": "*"
+  }
+}
