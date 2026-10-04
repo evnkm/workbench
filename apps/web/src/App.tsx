@@ -2,6 +2,7 @@ import clsx from "clsx";
 import { AlertTriangle, Menu, WifiOff } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Sidebar, useWorkspaceActivity } from "./components/Sidebar.tsx";
+import { ThemeSelect } from "./components/ThemeSelect.tsx";
 import { Button, inputClass } from "./components/ui.tsx";
 import { WorkspaceView } from "./components/WorkspaceView.tsx";
 import { useUnreadCount } from "./lib/hooks.ts";
@@ -41,7 +42,10 @@ function Login() {
           }
         }}
       >
-        <h1 className="text-lg font-semibold text-neutral-100">Workbench</h1>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-lg font-semibold text-neutral-100">Workbench</h1>
+          <ThemeSelect />
+        </div>
         <label className="block space-y-1.5">
           <span className="text-[12px] text-neutral-400">Password</span>
           <input
@@ -97,6 +101,7 @@ function Shell() {
           <div className="truncate text-[14px] font-semibold text-neutral-100">{title}</div>
           {subtitle && <div className="truncate text-[11px] text-neutral-500">{subtitle}</div>}
         </div>
+        <ThemeSelect />
       </header>
       {drawer && (
         <div className="fixed inset-0 z-40 md:hidden" role="dialog" aria-modal="true" aria-label="Navigation">

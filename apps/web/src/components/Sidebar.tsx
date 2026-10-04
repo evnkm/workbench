@@ -8,6 +8,7 @@ import { sendCommand } from "../lib/api.ts";
 import { useUnreadCount } from "../lib/hooks.ts";
 import { navigate, type Route } from "../lib/router.ts";
 import { logout, useStore } from "../lib/store.ts";
+import { ThemeSelect } from "./ThemeSelect.tsx";
 import { Button, Dialog, ErrorText, Field, IconButton, inputClass, StatusIndicator } from "./ui.tsx";
 
 /** The most urgent activity in a workspace, for its row indicator. */
@@ -196,6 +197,10 @@ export function Sidebar({ route, onNavigate }: { route: Route; onNavigate?: () =
             </div>
           );
         })}
+      </div>
+      <div className="flex shrink-0 items-center justify-between border-t border-wb-border px-3 py-2">
+        <span className="text-[12px] text-neutral-400">Appearance</span>
+        <ThemeSelect />
       </div>
       <div className="flex shrink-0 items-center justify-between border-t border-wb-border px-2 py-1.5 pb-safe">
         <label className="flex items-center gap-2 px-1 text-[12px] text-neutral-500">

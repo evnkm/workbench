@@ -9,6 +9,10 @@ Workbench is a personal development platform for an always-on EC2 instance, used
 
 Work continues on the server when the browser closes; open it again from any device.
 
+Choose System, Dark, or Light from Appearance at the bottom of the desktop sidebar
+or the theme dropdown in the phone header. The preference is saved in that browser;
+System follows the device's appearance, including changes while Workbench is open.
+
 It started from [the phased implementation plan](IMPLEMENTATION_PLAN.md) and reuses design and workspace ideas from [Canopy](../canopy) (see [NOTICE](NOTICE)).
 
 ## Status

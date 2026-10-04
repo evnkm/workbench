@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useImperativeHandle, useRef, useState } from "react";
+import { useTheme } from "../lib/theme.ts";
 
 export type TerminalHandle = { send: (data: string) => void; focus: () => void };
 
@@ -14,6 +15,7 @@ function theme() {
 }
 
 export function Terminal({ processId, ref }: { processId: string; ref?: React.Ref<TerminalHandle> }) {
+  const { effective } = useTheme();
   const host = useRef<HTMLDivElement>(null);
   const ws = useRef<WebSocket | null>(null);
   const term = useRef<XTerm | null>(null);
@@ -64,6 +66,11 @@ export function Terminal({ processId, ref }: { processId: string; ref?: React.Re
       term.current = null;
     };
   }, [processId, attempt]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reread CSS colors on theme changes without reattaching the terminal.
+  useEffect(() => {
+    if (term.current) term.current.options.theme = theme();
+  }, [effective]);
 
   return (
     <div className="relative h-full min-h-0 w-full">
