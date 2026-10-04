@@ -13,6 +13,12 @@ Choose System, Dark, or Light from Appearance at the bottom of the desktop sideb
 or the theme dropdown in the phone header. The preference is saved in that browser;
 System follows the device's appearance, including changes while Workbench is open.
 
+Conversations render fenced Mermaid diagrams and Markdown images, including local
+screenshots. Codex image-view, image-generation, and tool-image results appear inline.
+Local images are retained with conversation state and included in backups; click an
+image to open it at full size. Diagrams follow the current appearance and expose their
+source when rendering fails.
+
 It started from [the phased implementation plan](IMPLEMENTATION_PLAN.md) and reuses design and workspace ideas from [Canopy](../canopy) (see [NOTICE](NOTICE)).
 
 ## Status
@@ -49,5 +55,8 @@ npm run check                 # lint, typecheck, 56 tests (no real Codex usage)
 scripts/devctl.sh start       # dev worker and server on .workbench/ state (see .workbench/env)
 npm run dev -w @workbench/web # Vite on :5173; set WORKBENCH_DEV_API to the dev server
 ```
+
+To check rich conversation rendering against a running UI without real Codex calls,
+run `node e2e/rich-content.e2e.mjs` (or set `B` to the UI's development URL).
 
 Operations (deploys, backups, restores, recovery, Codex upgrades) are described in [docs/operations/setup.md](docs/operations/setup.md).

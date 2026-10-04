@@ -131,6 +131,19 @@ body[data-pane-resizing="vertical"] #root * {
 }
 
 /* Agent message markdown. */
+.wb-prose img {
+  display: block;
+  max-width: 100%;
+  max-height: 70dvh;
+  object-fit: contain;
+  border-radius: 6px;
+}
+.wb-mermaid svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin-inline: auto;
+}
 .wb-prose {
   overflow-wrap: anywhere;
   line-height: 1.6;

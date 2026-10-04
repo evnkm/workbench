@@ -17,6 +17,7 @@ import {
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { loadOlder, sortedItems, useStore } from "../lib/store.ts";
 import { Composer } from "./Composer.tsx";
+import { ConversationImages } from "./ConversationImages.tsx";
 import { DiffText } from "./DiffText.tsx";
 import { InputPanel } from "./InputPanel.tsx";
 import { Markdown } from "./Markdown.tsx";
@@ -26,6 +27,7 @@ export function ConversationView({ workspace }: { workspace: Workspace }) {
   const conv = useStore((s) => s.conversation);
   const conversation = useStore((s) => (s.conversation ? s.conversations[s.conversation.id] : undefined));
   const scroller = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
 
@@ -58,6 +60,17 @@ export function ConversationView({ workspace }: { workspace: Workspace }) {
     });
   }, [conv?.id, conv?.loading]);
 
+  // Images and lazy diagram rendering can resize a message after its item arrives.
+  useEffect(() => {
+    if (!conv?.id || !content.current) return;
+    const observer = new ResizeObserver(() => {
+      const el = scroller.current;
+      if (el && atBottom) el.scrollTop = el.scrollHeight;
+    });
+    observer.observe(content.current);
+    return () => observer.disconnect();
+  }, [atBottom, conv?.id]);
+
   const jump = () => {
     const el = scroller.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
@@ -89,7 +102,7 @@ export function ConversationView({ workspace }: { workspace: Workspace }) {
           aria-live="polite"
           aria-busy={conv.loading}
         >
-          <div className="mx-auto max-w-3xl space-y-3">
+          <div ref={content} className="mx-auto max-w-3xl space-y-3">
             {conv.hasMore && (
               <div className="flex justify-center">
                 <Button size="xs" onClick={() => void older()} disabled={loadingOlder}>
@@ -199,25 +212,30 @@ const ItemView = memo(function ItemView({ item }: { item: ConversationItem }) {
               </span>
             )}
             {d.text}
+            <ConversationImages item={item} />
           </div>
         </div>
       );
     case "agent_message":
       if (!d.text) return item.status === "in_progress" ? <div className="h-5" /> : null;
       return (
-        <Markdown text={d.text} className={clsx(d.phase === "commentary" ? "text-neutral-400" : "text-neutral-200")} />
+        <Markdown
+          itemId={item.id}
+          text={d.text}
+          className={clsx(d.phase === "commentary" ? "text-neutral-400" : "text-neutral-200")}
+        />
       );
     case "reasoning":
       if (!d.text?.trim()) return null;
       return (
         <Card icon={<Brain size={13} />} title="Thinking" tone="quiet">
-          <Markdown text={d.text} className="text-[13px] text-neutral-400" />
+          <Markdown itemId={item.id} text={d.text} className="text-[13px] text-neutral-400" />
         </Card>
       );
     case "plan":
       return (
         <Card icon={<ListTodo size={13} />} title="Plan" defaultOpen>
-          <Markdown text={d.text ?? ""} className="text-[13px]" />
+          <Markdown itemId={item.id} text={d.text ?? ""} className="text-[13px]" />
         </Card>
       );
     case "command":
@@ -226,16 +244,19 @@ const ItemView = memo(function ItemView({ item }: { item: ConversationItem }) {
       return <FileChangeCard item={item} />;
     case "tool_call":
       return (
-        <Card
-          icon={<Wrench size={13} />}
-          title={<span className="font-mono">{[d.server, d.tool].filter(Boolean).join(" · ")}</span>}
-          status={item.status}
-        >
-          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-[12px] text-neutral-400">
-            {JSON.stringify(d.arguments, null, 2)}
-            {d.error ? `\n\nError: ${d.error}` : d.result ? `\n\n${JSON.stringify(d.result, null, 2)}` : ""}
-          </pre>
-        </Card>
+        <>
+          <Card
+            icon={<Wrench size={13} />}
+            title={<span className="font-mono">{[d.server, d.tool].filter(Boolean).join(" · ")}</span>}
+            status={item.status}
+          >
+            <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-[12px] text-neutral-400">
+              {JSON.stringify(d.arguments, null, 2)}
+              {d.error ? `\n\nError: ${d.error}` : d.result ? `\n\n${JSON.stringify(d.result, null, 2)}` : ""}
+            </pre>
+          </Card>
+          <ConversationImages item={item} />
+        </>
       );
     case "web_search":
       return (
@@ -243,6 +264,8 @@ const ItemView = memo(function ItemView({ item }: { item: ConversationItem }) {
           <Search size={13} /> Searched the web{d.query ? `: ${d.query}` : ""}
         </div>
       );
+    case "image":
+      return <ConversationImages item={item} />;
     case "notice":
       return (
         <p className={clsx("text-[13px] italic", item.status === "failed" ? "text-red-300" : "text-neutral-500")}>
