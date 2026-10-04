@@ -12,6 +12,9 @@ These were installed in Phase 0 ([decision 0001](../decisions/0001-runtime-and-t
 - Tailscale 1.102.4.
 - Codex CLI 0.160.0, logged in (`codex login status` reports a ChatGPT login).
 - Docker 29 with Compose v2 (Ubuntu packages `docker.io` and `docker-compose-v2`). `ubuntu` is in the `docker` group, which projects such as Canopy use to run Postgres and Electric. Membership is effectively root access, the same as the passwordless sudo this user already has.
+- Canopy's `infra/electric/compose.yaml` pins `electricsql/electric:1.7.7`, but that Docker Hub repository has been broken since 2026-09-28 (electric-sql/electric#4822). As a local workaround, `electricsql/electric-temp:1.8.1` is pulled and tagged as `electricsql/electric:1.7.7`:
+  `docker pull electricsql/electric-temp:1.8.1 && docker tag electricsql/electric-temp:1.8.1 electricsql/electric:1.7.7`.
+  Remove the tag (`docker rmi electricsql/electric:1.7.7`) once Canopy updates its compose file.
 - mise, in `~/.local/bin`, for projects that pin their toolchains with it (Canopy installs bun 1.4.0 and node 24.20.0 through mise; the system Node is not affected).
 
 ## First install
