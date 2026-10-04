@@ -1,0 +1,13 @@
+{
+  "name": "@workbench/worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.ts"
+  },
+  "dependencies": {
+    "@workbench/contracts": "*",
+    "@workbench/db": "*",
+    "@workbench/runtime": "*"
+  }
+}
