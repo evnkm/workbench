@@ -1,0 +1,19 @@
+[Unit]
+Description=Workbench persistent shells (tmux server)
+After=network.target
+
+[Service]
+Type=forking
+User=ubuntu
+Group=ubuntu
+Environment=HOME=/home/ubuntu
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=/home/ubuntu
+ExecStart=/usr/bin/tmux -L workbench -f /home/ubuntu/.local/share/workbench/current/deploy/tmux.conf start-server
+ExecStop=/usr/bin/tmux -L workbench kill-server
+# Shells live in this unit's cgroup; restarting the API or worker never touches them.
+KillMode=control-group
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

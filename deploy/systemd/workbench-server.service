@@ -1,0 +1,21 @@
+[Unit]
+Description=Workbench API server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+Environment=HOME=/home/ubuntu
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=NODE_ENV=production
+EnvironmentFile=/home/ubuntu/.config/workbench/env
+WorkingDirectory=/home/ubuntu/.local/share/workbench/current
+ExecStart=/usr/local/bin/node apps/server/src/main.ts
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

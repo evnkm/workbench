@@ -1,0 +1,13 @@
+[Unit]
+Description=Workbench backup (database, Codex state, uncommitted worktree changes)
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+Environment=HOME=/home/ubuntu
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=/home/ubuntu/.config/workbench/env
+WorkingDirectory=/home/ubuntu/.local/share/workbench/current
+ExecStart=/usr/local/bin/node scripts/backup.ts
+Nice=10
