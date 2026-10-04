@@ -1,0 +1,12 @@
+{
+  "name": "@workbench/runtime",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@workbench/contracts": "*",
+    "cron-parser": "5.10.1"
+  }
+}
