@@ -1,0 +1,32 @@
+{
+  "name": "workbench",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": "24.21.0"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.ts",
+    "build": "npm run build -w @workbench/web",
+    "typecheck": "tsc -p tsconfig.json && tsc -p apps/web",
+    "test": "node --test --test-concurrency=1 \"packages/*/test/*.test.ts\" \"apps/*/test/*.test.ts\"",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "check": "npm run lint && npm run typecheck && npm test",
+    "set-password": "node scripts/set-password.ts",
+    "backup": "node scripts/backup.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@types/node": "26.6.4",
+    "playwright": "^1.63.0",
+    "typescript": "7.0.2"
+  },
+  "allowScripts": {
+    "node-pty@1.1.0": true
+  }
+}
