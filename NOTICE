@@ -1,0 +1,12 @@
+Workbench
+
+Portions of this software are adapted from Canopy (commit ea4f456),
+licensed under the Apache License, Version 2.0:
+
+  apps/web/src/index.css               design tokens (renamed canopy-* to wb-*)
+  apps/web/src/components/ui.tsx       Button and PaneHeader
+  apps/web/src/components/Sidebar.tsx  project/workspace hierarchy (recreated, not copied)
+  apps/web/src/components/WorkspaceView.tsx  pane and mobile tab layout (adapted)
+
+You may obtain a copy of the Apache License at
+http://www.apache.org/licenses/LICENSE-2.0

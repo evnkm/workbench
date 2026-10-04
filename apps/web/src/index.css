@@ -1,0 +1,213 @@
+@import "tailwindcss";
+
+/* Design tokens ported from Canopy (apps/web/src/index.css at ea4f456,
+   Apache-2.0; see NOTICE). Renamed canopy-* to wb-*. Dark is the default;
+   .light inverts the neutral ramp so utilities resolve in either theme. */
+@theme {
+  --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: "JetBrains Mono", Menlo, "SF Mono", Monaco, Consolas, "Liberation Mono", monospace;
+
+  --color-neutral-50: #fafafa;
+  --color-neutral-100: #f5f5f5;
+  --color-neutral-200: #e5e5e5;
+  --color-neutral-300: #d4d4d4;
+  --color-neutral-400: #a3a3a3;
+  --color-neutral-500: #737373;
+  --color-neutral-600: #525252;
+  --color-neutral-700: #404040;
+  --color-neutral-800: #262626;
+  --color-neutral-900: #171717;
+  --color-neutral-950: #0a0a0a;
+
+  --color-wb-bg: #0a0a0a;
+  --color-wb-panel: #111111;
+  --color-wb-panel-2: #161616;
+  --color-wb-border: #1f1f1f;
+  --color-wb-border-strong: #2b2b2b;
+  --color-wb-accent: #6ee7b7;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    --wb-scrollbar-thumb: rgba(255, 255, 255, 0.08);
+    --wb-scrollbar-thumb-hover: rgba(255, 255, 255, 0.15);
+  }
+
+  .light {
+    color-scheme: light;
+    --color-neutral-50: #0a0a0a;
+    --color-neutral-100: #171717;
+    --color-neutral-200: #262626;
+    --color-neutral-300: #404040;
+    --color-neutral-400: #525252;
+    --color-neutral-500: #737373;
+    --color-neutral-600: #a3a3a3;
+    --color-neutral-700: #d4d4d4;
+    --color-neutral-800: #e5e5e5;
+    --color-neutral-900: #f5f5f5;
+    --color-neutral-950: #fafafa;
+    --color-wb-bg: #ffffff;
+    --color-wb-panel: #ffffff;
+    --color-wb-panel-2: #f4f4f5;
+    --color-wb-border: #e5e5e5;
+    --color-wb-border-strong: #d4d4d4;
+    --color-wb-accent: #059669;
+    --wb-scrollbar-thumb: rgba(0, 0, 0, 0.15);
+    --wb-scrollbar-thumb-hover: rgba(0, 0, 0, 0.25);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    overscroll-behavior: none;
+  }
+  body {
+    background: var(--color-wb-bg);
+    color: var(--color-neutral-200);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    -webkit-tap-highlight-color: transparent;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--color-wb-accent) 30%, transparent);
+  }
+  *,
+  *::before,
+  *::after {
+    border-color: var(--color-wb-border);
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--wb-scrollbar-thumb);
+    border-radius: 6px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--wb-scrollbar-thumb-hover);
+  }
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-wb-accent) 70%, transparent);
+    outline-offset: 1px;
+  }
+}
+
+.xterm {
+  height: 100%;
+  width: 100%;
+}
+.xterm .xterm-viewport.xterm-viewport.xterm-viewport {
+  background-color: var(--color-wb-bg);
+}
+
+body[data-pane-resizing="vertical"],
+body[data-pane-resizing="vertical"] #root,
+body[data-pane-resizing="vertical"] #root * {
+  cursor: col-resize;
+  user-select: none;
+}
+
+@keyframes wb-wave {
+  0%,
+  100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+.wb-wave-bar {
+  transform-origin: center;
+  animation: wb-wave 0.9s ease-in-out infinite;
+}
+
+/* Agent message markdown. */
+.wb-prose {
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+  font-size: 14px;
+}
+/* biome-ignore lint/style/noDescendingSpecificity: prose spacing intentionally follows element rules. */
+.wb-prose > * + * {
+  margin-top: 0.6em;
+}
+.wb-prose h1,
+.wb-prose h2,
+.wb-prose h3 {
+  font-weight: 600;
+  color: var(--color-neutral-100);
+}
+.wb-prose h1 {
+  font-size: 1.2em;
+}
+.wb-prose h2 {
+  font-size: 1.1em;
+}
+.wb-prose a {
+  color: var(--color-wb-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.wb-prose ul {
+  list-style: disc;
+  padding-left: 1.3em;
+}
+.wb-prose ol {
+  list-style: decimal;
+  padding-left: 1.3em;
+}
+.wb-prose code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--color-wb-panel-2);
+  border: 1px solid var(--color-wb-border);
+  border-radius: 4px;
+  padding: 0.05em 0.3em;
+}
+.wb-prose pre {
+  background: var(--color-wb-panel-2);
+  border: 1px solid var(--color-wb-border);
+  border-radius: 6px;
+  padding: 0.7em 0.8em;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.wb-prose pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: inherit;
+}
+.wb-prose blockquote {
+  border-left: 3px solid var(--color-wb-border-strong);
+  padding-left: 0.8em;
+  color: var(--color-neutral-400);
+}
+.wb-prose table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.wb-prose th,
+.wb-prose td {
+  border: 1px solid var(--color-wb-border);
+  padding: 0.25em 0.5em;
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
