@@ -95,6 +95,16 @@ function Shell() {
           : "Workbench";
   const subtitle = route.name === "workspace" && workspace ? projects[workspace.projectId]?.name : null;
 
+  const tabTitle =
+    route.name === "apps"
+      ? "Apps"
+      : route.name === "workspace" && workspace && subtitle
+        ? `${subtitle}/${workspace.name}`
+        : "Workbench";
+  useEffect(() => {
+    document.title = tabTitle;
+  }, [tabTitle]);
+
   return (
     <div className="flex h-dvh min-h-0 flex-col md:flex-row">
       {/* Desktop sidebar */}
