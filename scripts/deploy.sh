@@ -45,7 +45,7 @@ else
   # Keep the five newest releases, whatever current/previous point at, and any release a
   # running service still runs from (the worker stays on its release unless --worker).
   keep=$(readlink -f "$STATE/current"; readlink -f "$STATE/previous" 2>/dev/null || true
-    for svc in workbench-server workbench-worker; do
+    for svc in workbench-server workbench-worker workbench-miniapps; do
       pid=$(systemctl show -p MainPID --value "$svc" 2>/dev/null || true)
       [[ -n $pid && $pid != 0 ]] && readlink "/proc/$pid/cwd" 2>/dev/null | sed 's/ (deleted)$//' || true
     done)
@@ -61,6 +61,13 @@ fi
 if $restart_worker; then
   echo "Restarting worker (active turns will be marked interrupted)"
   sudo systemctl restart workbench-worker
+fi
+# Mini-apps have their own process; updating them never interrupts coding sessions.
+if [[ -f "$STATE/current/deploy/systemd/workbench-miniapps.service" ]]; then
+  sudo install -m 644 "$STATE/current/deploy/systemd/workbench-miniapps.service" /etc/systemd/system/workbench-miniapps.service
+  sudo systemctl daemon-reload
+  sudo systemctl enable workbench-miniapps >/dev/null
+  sudo systemctl restart workbench-miniapps
 fi
 sudo systemctl restart workbench-server
 sleep 2

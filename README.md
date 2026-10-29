@@ -83,6 +83,34 @@ API from a durable outbox. VAPID identity lives in `push-keys.json` under the st
 directory and is included in backups. The push-only service worker never caches
 conversation data or authenticated pages.
 
+Open **Mini-apps** in the navigation for tools that run independently of coding
+conversations. Rolodex is the first: describe people and their relationships in
+the draggable chat pill, then explore the live 3D graph or searchable person cards.
+Possible name matches show existing cards and require confirmation before any
+changes from that note are committed. You can match an existing person, create
+a separate person with the same name, or cancel the note. Corrections preserve
+unrelated facts; explicit name corrections retain the old name as an alias.
+
+Mini-apps run in `workbench-miniapps.service` on loopback port 4312 behind
+Workbench's authenticated `/api/apps/*` proxy, which allows each app's routes
+explicitly. The host uses its own local credential and keeps each app's state in
+its own SQLite file under `miniapps/<app>/` in the Workbench state directory. Backups include each mini-app's SQLite database through
+SQLite's online backup mechanism. API restarts and coding-session restarts do not
+stop mini-app work. Interrupted extraction is retained visibly for retry.
+
+Rolodex uses the installed `codex exec` or `claude -p` with structured output and
+no enrichment APIs. Notes, history, and graph data are stored locally; submitted
+notes, relevant conversation history, and the current network are sent to the
+selected AI provider for interpretation. This is not fully offline inference.
+The agent proposes structured changes and cannot directly write the app database.
+Graph updates are committed in one transaction and streamed to open browsers.
+
+To build another mini-app in a coding session, add its own module and SQLite store
+under `apps/miniapps/src`, mount its local routes, explicitly allow its authenticated
+proxy paths in `apps/server/src/app.ts`, and add its gallery entry/view in
+`MiniAppsView.tsx`. Keep each app's state in its own subdirectory under `miniapps/`;
+files ending in `.sqlite` are picked up by the backup process automatically.
+
 It started from [the phased implementation plan](IMPLEMENTATION_PLAN.md) and reuses design and workspace ideas from [Canopy](../canopy) (see [NOTICE](NOTICE)).
 
 ## Status

@@ -11,6 +11,7 @@ import { initializeSounds } from "./lib/notifications.ts";
 import { navigate, useRoute } from "./lib/router.ts";
 import { boot, login, openConversation, useStore } from "./lib/store.ts";
 
+const MiniAppsView = lazy(() => import("./components/MiniAppsView.tsx").then((m) => ({ default: m.MiniAppsView })));
 const JobsView = lazy(() => import("./components/JobsView.tsx").then((m) => ({ default: m.JobsView })));
 
 export function App() {
@@ -80,7 +81,16 @@ function Shell() {
     if (route.name !== "workspace") void openConversation(null);
   }, [route.name]);
 
-  const title = route.name === "workspace" && workspace ? workspace.name : route.name === "jobs" ? "Jobs" : "Workbench";
+  const title =
+    route.name === "workspace" && workspace
+      ? workspace.name
+      : route.name === "jobs"
+        ? "Jobs"
+        : route.name === "apps"
+          ? route.app === "rolodex"
+            ? "Rolodex"
+            : "Mini-apps"
+          : "Workbench";
   const subtitle = route.name === "workspace" && workspace ? projects[workspace.projectId]?.name : null;
 
   return (
@@ -121,7 +131,7 @@ function Shell() {
         </div>
       )}
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <StatusBanner />
+        {route.name !== "apps" && <StatusBanner />}
         <div className="min-h-0 flex-1">
           {!loaded ? null : route.name === "workspace" ? (
             workspace ? (
@@ -134,6 +144,10 @@ function Shell() {
             ) : (
               <NotFound />
             )
+          ) : route.name === "apps" ? (
+            <Suspense fallback={null}>
+              <MiniAppsView app={route.app} />
+            </Suspense>
           ) : route.name === "jobs" ? (
             <Suspense fallback={null}>
               <JobsView runId={route.runId} />

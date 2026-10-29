@@ -4,6 +4,8 @@
     "packages/*/src",
     "packages/*/test",
     "apps/server/src",
+    "apps/miniapps/src",
+    "apps/miniapps/test",
     "apps/server/test",
     "apps/worker/src",
     "apps/worker/test",

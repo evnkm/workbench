@@ -39,6 +39,25 @@ manifest.schemaVersion = db.get<{ user_version: number }>("PRAGMA user_version")
 if (existsSync(join(config.stateDir, "media")))
   cpSync(join(config.stateDir, "media"), join(out, "media"), { recursive: true });
 
+// Each mini-app owns an independent SQLite database. Back it up through SQLite,
+// not file copying, so committed WAL writes are included consistently.
+const miniappsDir = join(config.stateDir, "miniapps");
+if (existsSync(miniappsDir))
+  for (const name of readdirSync(miniappsDir)) {
+    const appDir = join(miniappsDir, name);
+    if (!statSync(appDir).isDirectory()) continue;
+    for (const file of readdirSync(appDir).filter((file) => file.endsWith(".sqlite"))) {
+      const target = join(out, "miniapps", name);
+      mkdirSync(target, { recursive: true });
+      const source = new DatabaseSync(join(appDir, file), { readOnly: true });
+      try {
+        source.prepare("VACUUM INTO ?").run(join(target, file));
+      } finally {
+        source.close();
+      }
+    }
+  }
+
 // Preserve the application identity used by existing browser push subscriptions.
 if (existsSync(join(config.stateDir, "push-keys.json")))
   cpSync(join(config.stateDir, "push-keys.json"), join(out, "push-keys.json"));

@@ -9,4 +9,5 @@ export * from "./inspection.ts";
 export * from "./ipc.ts";
 export * from "./jobs.ts";
 export * from "./notifications.ts";
+export * from "./rolodex.ts";
 export * from "./states.ts";

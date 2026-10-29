@@ -34,6 +34,7 @@ import {
   listProcesses,
   listProjects,
   listWorkspaces,
+  miniAppHostToken,
   oldestSeq,
   saveItem,
 } from "@workbench/db";
@@ -106,6 +107,40 @@ export function createApp({ db, config, auth, link, log, previews, notifications
   app.get("/api/auth/session", (c) => c.json({ ok: true }));
 
   notifications?.routes(app, auth);
+  app.use("/api/apps/*", bodyLimit({ maxSize: 32_000 }));
+  app.all("/api/apps/*", async (c) => {
+    const path = c.req.path.slice("/api/apps".length);
+    const { method } = c.req;
+    if (
+      !(
+        (method === "GET" && ["/rolodex/state", "/rolodex/events"].includes(path)) ||
+        (method === "POST" &&
+          (path === "/rolodex/messages" || /^\/rolodex\/messages\/[a-f0-9-]+\/resolve$/.test(path)))
+      )
+    )
+      return c.json({ error: "Not found." }, 404);
+    const body = method === "POST" ? await c.req.text() : undefined;
+    if (body && Buffer.byteLength(body) > 32_000) return c.json({ error: "The request is too long." }, 413);
+    try {
+      const response = await fetch(`http://127.0.0.1:4312${path}`, {
+        method: c.req.method,
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${miniAppHostToken(config.stateDir)}` },
+        body,
+        signal: path.endsWith("/events") ? c.req.raw.signal : AbortSignal.timeout(5000),
+      });
+      // A host credential mismatch must not read as the browser's session expiring.
+      return new Response(response.body, {
+        status: response.status === 401 ? 502 : response.status,
+        headers: {
+          "Content-Type": path.endsWith("/events") ? "text/event-stream" : "application/json",
+          "Cache-Control": "no-store",
+          "X-Accel-Buffering": "no",
+        },
+      });
+    } catch {
+      return c.json({ error: "The mini-app host is not running." }, 503);
+    }
+  });
 
   // ---------------------------------------------------------------- state
 

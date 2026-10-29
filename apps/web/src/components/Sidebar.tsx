@@ -2,7 +2,7 @@
 // hierarchy against Workbench data.
 import type { Project, Run, Workspace } from "@workbench/contracts";
 import clsx from "clsx";
-import { Archive, ChevronRight, Clock, FolderGit2, LogOut, Plus, Search } from "lucide-react";
+import { Archive, ChevronRight, Clock, FolderGit2, Layers3, LogOut, Plus, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { sendCommand } from "../lib/api.ts";
 import { useUnreadCount } from "../lib/hooks.ts";
@@ -94,6 +94,19 @@ export function Sidebar({ route, onNavigate }: { route: Route; onNavigate?: () =
             <Plus size={16} />
           </IconButton>
         </div>
+      </div>
+      <div className="shrink-0 border-b border-wb-border p-2">
+        <button
+          type="button"
+          onClick={() => go({ name: "apps", app: null })}
+          aria-current={route.name === "apps" ? "page" : undefined}
+          className={clsx(
+            "flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-[13px] font-medium md:h-8",
+            route.name === "apps" ? "bg-neutral-800/70 text-neutral-100" : "text-neutral-300 hover:bg-neutral-900",
+          )}
+        >
+          <Layers3 size={15} className="text-neutral-500" /> Mini-apps
+        </button>
       </div>
       <div className="shrink-0 px-2 pt-2">
         <div className="relative">
