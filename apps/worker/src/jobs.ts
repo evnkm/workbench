@@ -371,7 +371,6 @@ export class Jobs {
       approvalPolicy: "never",
       title: `Job: ${job.name}`,
     });
-    db.run("UPDATE runs SET conversation_id = :c WHERE id = :id", { c: conversationId, id: run.id });
     updateRun(db, run.id, { conversationId });
     const { runId: agentRunId } = await this.codex.submitTurn({ conversationId, text: job.command, mode: "default" });
     let reason: "cancel" | "timeout" | null = null;

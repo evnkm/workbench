@@ -312,7 +312,8 @@ export function saveRun(db: Database, run: Run, owner: string | null = null): Ru
          error, attempt, owner, created_at, started_at, ended_at)
        VALUES (:id, :kind, :ws, :conv, :job, :state, :turn, :summary, :stop, :error, :attempt, :owner, :created,
          :started, :ended)
-       ON CONFLICT(id) DO UPDATE SET state = excluded.state, provider_turn_id = excluded.provider_turn_id,
+       ON CONFLICT(id) DO UPDATE SET conversation_id = excluded.conversation_id,
+         state = excluded.state, provider_turn_id = excluded.provider_turn_id,
          stop_reason = excluded.stop_reason, error = excluded.error, owner = coalesce(excluded.owner, runs.owner),
          started_at = excluded.started_at, ended_at = excluded.ended_at`,
       {
