@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { getRun, listItems } from "@workbench/db";
+import { getCommand, getConversation, getRun, insertCommand, listItems } from "@workbench/db";
 import { readRetainedImage } from "@workbench/runtime";
 import { CodexProvider } from "../src/codex/provider.ts";
+import { CommandLoop } from "../src/commands.ts";
 import { Workspaces } from "../src/workspaces.ts";
 import { makeContext, makeRepo, waitFor } from "./helpers.ts";
 
@@ -40,6 +41,24 @@ test("a turn streams items and records success; the user message is not duplicat
     ["user_message", "agent_message"],
   );
   assert.equal(items[1]!.data.text, "Done.");
+});
+
+test("deleting a completed conversation is durable, idempotent, and rejects subsequent turns", async () => {
+  const { ctx, codex, conv } = await setup();
+  const conversationId = await conv();
+  const { runId } = await codex.submitTurn({ conversationId, text: "hello", mode: "default" });
+  await waitFor(() => runState(ctx, runId) === "succeeded");
+  const loop = new CommandLoop(ctx);
+  loop.register(codex.handlers());
+  const { command } = insertCommand(ctx.db, "delete-conversation", "conversation.delete", { conversationId });
+  loop.wake();
+  await waitFor(() => getCommand(ctx.db, command.id)!.state === "succeeded");
+  await loop.stop();
+  assert.equal(getConversation(ctx.db, conversationId), undefined);
+  assert.equal(getRun(ctx.db, runId), undefined);
+  assert.deepEqual(listItems(ctx.db, conversationId, null, 100).items, []);
+  await codex.deleteConversation({ conversationId });
+  await assert.rejects(codex.submitTurn({ conversationId, text: "hello", mode: "default" }), /Conversation not found/);
 });
 
 test("image completion replay preserves retained screenshots after their temporary file disappears", async () => {

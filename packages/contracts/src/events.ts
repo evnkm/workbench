@@ -17,6 +17,7 @@ export type EventBody =
   | { type: "project.upserted"; project: Project }
   | { type: "workspace.upserted"; workspace: Workspace }
   | { type: "conversation.upserted"; conversation: Conversation }
+  | { type: "conversation.deleted"; conversationId: string }
   | { type: "run.upserted"; run: Run }
   | { type: "input.upserted"; input: PendingInput }
   | { type: "command.upserted"; command: Command }

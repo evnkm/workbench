@@ -45,6 +45,7 @@ export const commandSchemas = {
     model: z.string().max(100).optional(),
   }),
   "conversation.rename": z.object({ conversationId: id, title: name }),
+  "conversation.delete": z.object({ conversationId: id }),
   "turn.start": z.object({
     conversationId: id,
     text: z.string().min(1).max(100_000),

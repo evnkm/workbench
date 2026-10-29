@@ -1,9 +1,19 @@
 // Workspace screen, adapted from Canopy's WorkspaceView: conversation in the
 // main area and a collapsible side panel (Changes, Run, Shell) on desktop;
 // one full-screen pane at a time with a bottom tab bar on phones.
-import type { Conversation, Workspace } from "@workbench/contracts";
+import { type Conversation, isTerminalRunState, type Workspace } from "@workbench/contracts";
 import clsx from "clsx";
-import { Archive, ArchiveRestore, Code2, PanelRightClose, PanelRightOpen, Pencil, Plus, RotateCcw } from "lucide-react";
+import {
+  Archive,
+  ArchiveRestore,
+  Code2,
+  PanelRightClose,
+  PanelRightOpen,
+  Pencil,
+  Plus,
+  RotateCcw,
+  X,
+} from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, sendCommand } from "../lib/api.ts";
 import { useIsDesktop } from "../lib/media.ts";
@@ -44,13 +54,15 @@ export function WorkspaceView({
     () => (localStorage.getItem("wb:side-tab") as Exclude<Pane, "conversation">) || "changes",
   );
   const [newConv, setNewConv] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const desktop = useIsDesktop();
 
-  // Default to the most recently active conversation.
+  // Default to the most recently active conversation, including after deletion in another browser.
   useEffect(() => {
-    if (conversationId || conversations.length === 0) return;
-    const latest = [...conversations].sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt))[0]!;
-    navigate({ name: "workspace", workspaceId: workspace.id, conversationId: latest.id, pane }, true);
+    if (conversations.some((c) => c.id === conversationId)) return;
+    const latest = [...conversations].sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt))[0];
+    navigate({ name: "workspace", workspaceId: workspace.id, conversationId: latest?.id ?? null, pane }, true);
   }, [conversationId, conversations, workspace.id, pane]);
 
   useEffect(() => {
@@ -66,6 +78,19 @@ export function WorkspaceView({
 
   const go = (p: Pane, c: string | null = conversationId) =>
     navigate({ name: "workspace", workspaceId: workspace.id, conversationId: c, pane: p });
+
+  const removeConversation = async (c: Conversation) => {
+    if (!confirm(`Delete "${c.title}" and its conversation history? This cannot be undone.`)) return;
+    setDeleting(c.id);
+    setDeleteError(null);
+    try {
+      await sendCommand("conversation.delete", { conversationId: c.id });
+    } catch (e) {
+      setDeleteError((e as Error).message);
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   const toggleSide = () => {
     localStorage.setItem("wb:side-open", sideOpen ? "0" : "1");
@@ -100,33 +125,47 @@ export function WorkspaceView({
             role="tablist"
           >
             {conversations.map((c) => {
-              const active = Object.values(runs).find(
-                (r) =>
-                  r.conversationId === c.id && !["succeeded", "failed", "cancelled", "interrupted"].includes(r.state),
-              );
+              const active = Object.values(runs).find((r) => r.conversationId === c.id && !isTerminalRunState(r.state));
               return (
-                <button
+                <div
                   key={c.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={c.id === conversationId}
-                  onClick={() => go("conversation", c.id)}
+                  role="presentation"
                   className={clsx(
-                    "flex h-8 max-w-52 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[13px]",
+                    "flex h-9 max-w-60 shrink-0 items-center rounded-md text-[13px] md:h-8",
                     c.id === conversationId
                       ? "bg-neutral-800 text-neutral-100"
                       : "text-neutral-400 hover:bg-neutral-900",
                   )}
                 >
-                  {active && <StatusIndicator state={active.state} />}
-                  <span className="truncate">{c.title}</span>
-                </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={c.id === conversationId}
+                    onClick={() => go("conversation", c.id)}
+                    className="flex h-full min-w-0 items-center gap-1.5 rounded-md px-2.5"
+                  >
+                    {active && <StatusIndicator state={active.state} />}
+                    <span className="truncate">{c.title}</span>
+                  </button>
+                  <IconButton
+                    label={`Delete conversation: ${c.title}`}
+                    title={
+                      active ? "Stop the active or queued run before deleting this conversation" : `Delete ${c.title}`
+                    }
+                    disabled={Boolean(active) || deleting !== null}
+                    className="hover:text-red-400"
+                    onClick={() => void removeConversation(c)}
+                  >
+                    <X size={14} />
+                  </IconButton>
+                </div>
               );
             })}
             <IconButton label="New conversation" onClick={() => setNewConv(true)}>
               <Plus size={16} />
             </IconButton>
           </div>
+          {deleteError && <ErrorText>{deleteError}</ErrorText>}
           <div className="min-h-0 flex-1">
             {conversationId && allConversations[conversationId] ? (
               <ConversationView workspace={workspace} />

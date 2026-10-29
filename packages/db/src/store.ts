@@ -122,12 +122,13 @@ export const toInput = (r: Row): PendingInput => ({
   resolvedAt: str(r.resolved_at),
 });
 
-const toEvent = (r: Row): AppEvent => ({
-  ...(json<EventBody>(r.body) as EventBody),
-  seq: Number(r.seq),
-  conversationId: str(r.conversation_id),
-  createdAt: String(r.created_at),
-});
+const toEvent = (r: Row): AppEvent =>
+  ({
+    ...json<EventBody>(r.body),
+    seq: Number(r.seq),
+    conversationId: str(r.conversation_id),
+    createdAt: String(r.created_at),
+  }) as AppEvent;
 
 // ---------------------------------------------------------------- events
 
@@ -279,6 +280,21 @@ export function updateConversation(db: Database, id: string, patch: Partial<Conv
     const c = getConversation(db, id);
     if (!c) throw new Error(`conversation ${id} not found`);
     return saveConversation(db, { ...c, ...patch, updatedAt: nowIso() });
+  });
+}
+
+/** The worker checks that no turn or job is active before deleting its conversation. */
+export function deleteConversation(db: Database, id: string) {
+  db.tx(() => {
+    db.run("DELETE FROM pending_inputs WHERE conversation_id = :id", { id });
+    db.run("DELETE FROM items WHERE conversation_id = :id", { id });
+    // Job execution history and artifacts belong to the job, independently of its conversation.
+    const jobs = db.all<Row>("SELECT * FROM runs WHERE conversation_id = :id AND kind = 'job'", { id });
+    db.run("DELETE FROM events WHERE conversation_id = :id", { id });
+    for (const job of jobs) updateRun(db, String(job.id), { conversationId: null });
+    db.run("DELETE FROM runs WHERE conversation_id = :id", { id });
+    db.run("DELETE FROM conversations WHERE id = :id", { id });
+    appendEvent(db, { type: "conversation.deleted", conversationId: id }, id);
   });
 }
 

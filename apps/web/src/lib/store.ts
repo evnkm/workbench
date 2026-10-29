@@ -219,6 +219,17 @@ function reduce(s: State, e: AppEvent): Partial<State> {
       return { workspaces: { ...s.workspaces, [e.workspace.id]: e.workspace } };
     case "conversation.upserted":
       return { conversations: { ...s.conversations, [e.conversation.id]: e.conversation } };
+    case "conversation.deleted": {
+      const conversations = { ...s.conversations };
+      delete conversations[e.conversationId];
+      return {
+        conversations,
+        runs: Object.fromEntries(Object.entries(s.runs).filter(([, r]) => r.conversationId !== e.conversationId)),
+        inputs: Object.fromEntries(Object.entries(s.inputs).filter(([, i]) => i.conversationId !== e.conversationId)),
+        // In-flight snapshots must not bring the deleted conversation back.
+        conversation: conv?.id === e.conversationId ? null : conv,
+      };
+    }
     case "run.upserted":
       return {
         runs: { ...s.runs, [e.run.id]: e.run },

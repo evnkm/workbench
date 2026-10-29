@@ -15,6 +15,7 @@ import {
   appendItemDelta,
   cancelOpenInputsForRun,
   createInput,
+  deleteConversation,
   getConversation,
   getInput,
   getItem,
@@ -89,6 +90,10 @@ export class CodexProvider {
           this.ctx.published();
           return { conversationId: p.conversationId };
         },
+      },
+      "conversation.delete": {
+        key: (p) => `conversation:${p.conversationId}`,
+        run: (p) => this.deleteConversation(p),
       },
       "turn.start": { key: (p) => `conversation:${p.conversationId}`, run: (p) => this.submitTurn(p) },
       "turn.interrupt": { key: (p) => `conversation:${p.conversationId}`, run: (p) => this.interrupt(p) },
@@ -297,6 +302,26 @@ export class CodexProvider {
     });
     this.ctx.published();
     return { conversationId: c.id };
+  }
+
+  async deleteConversation(p: { conversationId: string }) {
+    const db = this.ctx.db;
+    const conv = getConversation(db, p.conversationId);
+    // Concurrent deletes from different browsers are harmless.
+    if (!conv) return { conversationId: p.conversationId };
+    if (listActiveRuns(db).some((run) => run.conversationId === conv.id)) {
+      throw new CommandError("Stop the active or queued run before deleting this conversation.");
+    }
+    deleteConversation(db, conv.id);
+    if (conv.providerThreadId) this.loadedThreads.delete(conv.providerThreadId);
+    for (const [key, item] of this.liveItems) {
+      if (item.conversationId === conv.id) this.liveItems.delete(key);
+    }
+    for (const [key, buffer] of this.deltas) {
+      if (buffer.item.conversationId === conv.id) this.deltas.delete(key);
+    }
+    this.ctx.published();
+    return { conversationId: conv.id };
   }
 
   private workspaceBusy(workspaceId: string, exceptRun?: string) {

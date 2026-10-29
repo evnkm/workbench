@@ -9,17 +9,26 @@ import {
   claimCommand,
   createInput,
   Database,
+  deleteConversation,
   eventsAfter,
   failOrphanedCommands,
+  getConversation,
+  getRun,
   insertCommand,
+  insertJobRun,
   latestSeq,
+  listArtifacts,
+  listConversations,
   listProjects,
   resolveInput,
+  saveArtifact,
   saveConversation,
   saveItem,
+  saveJob,
   saveProject,
   saveRun,
   saveWorkspace,
+  updateRun,
 } from "../src/index.ts";
 
 const tempDb = () => {
@@ -165,6 +174,95 @@ test("event replay is ordered and filters detail events by conversation", () => 
     eventsAfter(db, seqs[1]!, conversation.id).map((e) => e.seq),
     seqs.slice(2),
   );
+});
+
+test("conversation deletion removes history and publishes a tombstone while preserving job results", () => {
+  const db = tempDb();
+  const { conversation, workspace } = seed(db);
+  const other = saveConversation(db, { ...conversation, id: uuidv7(), title: "Keep" });
+  const turn = saveRun(db, run(conversation.id, workspace.id, "succeeded"));
+  saveItem(db, {
+    id: uuidv7(),
+    conversationId: conversation.id,
+    runId: turn.id,
+    providerItemId: null,
+    kind: "agent_message",
+    status: "completed",
+    data: { text: "Delete this history" },
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  });
+  createInput(
+    db,
+    {
+      id: uuidv7(),
+      conversationId: conversation.id,
+      runId: turn.id,
+      kind: "command_approval",
+      state: "cancelled",
+      request: { title: "Approve command" },
+      response: null,
+      createdAt: nowIso(),
+      resolvedAt: nowIso(),
+    },
+    "request",
+  );
+  const job = saveJob(db, {
+    id: uuidv7(),
+    name: "Job",
+    kind: "codex",
+    command: "hello",
+    projectId: null,
+    workspaceId: workspace.id,
+    isolation: "workspace",
+    timeoutSeconds: 60,
+    maxAttempts: 1,
+    retryUnknownOutcome: false,
+    schedule: null,
+    paused: false,
+    nextRunAt: null,
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  });
+  const jobRun = { ...run(conversation.id, workspace.id, "succeeded"), kind: "job" as const, jobId: job.id };
+  insertJobRun(db, { run: jobRun, jobId: job.id, trigger: "manual", occurrenceAt: null, retryOf: null });
+  updateRun(db, jobRun.id, { conversationId: conversation.id });
+  const artifact = saveArtifact(db, {
+    id: uuidv7(),
+    runId: jobRun.id,
+    name: "result",
+    path: "/result",
+    bytes: 1,
+    pinned: true,
+    createdAt: nowIso(),
+  });
+  const cursor = latestSeq(db);
+  deleteConversation(db, conversation.id);
+  assert.equal(getConversation(db, conversation.id), undefined);
+  assert.equal(getRun(db, turn.id), undefined);
+  assert.deepEqual(
+    listConversations(db).map((c) => c.id),
+    [other.id],
+  );
+  for (const table of ["items", "pending_inputs", "runs"]) {
+    assert.equal(
+      db.get<{ n: number }>(`SELECT count(*) n FROM ${table} WHERE conversation_id = :id`, {
+        id: conversation.id,
+      })!.n,
+      0,
+    );
+  }
+  assert.equal(getRun(db, jobRun.id)!.conversationId, null);
+  assert.deepEqual(listArtifacts(db, jobRun.id), [artifact]);
+  const replay = eventsAfter(db, 0, conversation.id).filter((e) => e.conversationId === conversation.id);
+  assert.deepEqual(
+    replay.map((e) => e.type),
+    ["conversation.deleted"],
+  );
+  const events = eventsAfter(db, cursor, other.id);
+  assert.ok(events.some((e) => e.type === "run.upserted" && e.run.id === jobRun.id && e.run.conversationId === null));
+  assert.ok(events.some((e) => e.type === "conversation.deleted" && e.conversationId === conversation.id));
+  db.close();
 });
 
 test("an item's position equals the sequence of the event that created it", () => {

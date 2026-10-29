@@ -19,6 +19,10 @@ Local images are retained with conversation state and included in backups; click
 image to open it at full size. Diagrams follow the current appearance and expose their
 source when rendering fails.
 
+Use the X on a conversation tab to delete its history. Active or queued runs must
+be stopped first. Deletion syncs to other browsers; job execution history and
+artifacts are retained independently of the conversation.
+
 It started from [the phased implementation plan](IMPLEMENTATION_PLAN.md) and reuses design and workspace ideas from [Canopy](../canopy) (see [NOTICE](NOTICE)).
 
 ## Status
@@ -51,12 +55,14 @@ docs/operations Setup, operations, and the acceptance record
 
 ```sh
 npm ci
-npm run check                 # lint, typecheck, 56 tests (no real Codex usage)
+npm run check                 # lint, typecheck, tests (no real Codex usage)
 scripts/devctl.sh start       # dev worker and server on .workbench/ state (see .workbench/env)
 npm run dev -w @workbench/web # Vite on :5173; set WORKBENCH_DEV_API to the dev server
 ```
 
 To check rich conversation rendering against a running UI without real Codex calls,
 run `node e2e/rich-content.e2e.mjs` (or set `B` to the UI's development URL).
+`node e2e/conversation-deletion.e2e.mjs` checks tab deletion and cross-browser
+updates on desktop and mobile using disposable API fixtures.
 
 Operations (deploys, backups, restores, recovery, Codex upgrades) are described in [docs/operations/setup.md](docs/operations/setup.md).
