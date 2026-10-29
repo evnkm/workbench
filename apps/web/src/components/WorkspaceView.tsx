@@ -4,7 +4,7 @@
 import type { Conversation, Workspace } from "@workbench/contracts";
 import clsx from "clsx";
 import { Archive, ArchiveRestore, Code2, PanelRightClose, PanelRightOpen, Pencil, Plus, RotateCcw } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, sendCommand } from "../lib/api.ts";
 import { useIsDesktop } from "../lib/media.ts";
 import { navigate, type Pane } from "../lib/router.ts";
@@ -58,7 +58,10 @@ export function WorkspaceView({
   }, [conversationId]);
 
   useEffect(() => {
-    if (pane !== "conversation") setSideTab(pane);
+    if (pane !== "conversation") {
+      setSideTab(pane);
+      setSideOpen(true);
+    }
   }, [pane]);
 
   const go = (p: Pane, c: string | null = conversationId) =>
@@ -134,7 +137,7 @@ export function WorkspaceView({
         </section>
         {/* Desktop side panel */}
         {desktop && sideOpen && (
-          <aside className="hidden w-[min(44vw,620px)] min-w-[340px] shrink-0 flex-col border-l border-wb-border md:flex">
+          <ResizableSidePanel>
             <div
               className="flex h-10 shrink-0 items-center gap-1 border-b border-wb-border bg-wb-panel px-2"
               role="tablist"
@@ -156,7 +159,7 @@ export function WorkspaceView({
               ))}
             </div>
             <div className="min-h-0 flex-1">{sidePanel(sideTab)}</div>
-          </aside>
+          </ResizableSidePanel>
         )}
         {/* Phone: the selected non-conversation pane fills the screen. */}
         {!desktop && pane !== "conversation" && <div className="min-h-0 min-w-0 flex-1">{sidePanel(pane)}</div>}
@@ -173,6 +176,82 @@ export function WorkspaceView({
         />
       )}
     </div>
+  );
+}
+
+function ResizableSidePanel({ children }: { children: ReactNode }) {
+  const panel = useRef<HTMLElement>(null);
+  const drag = useRef<{ x: number; width: number } | null>(null);
+  const [available, setAvailable] = useState(window.innerWidth - 256);
+  const [preferred, setPreferred] = useState(() => {
+    const saved = Number(localStorage.getItem("wb:side-width"));
+    return Number.isFinite(saved) && saved > 0 ? saved : Math.min(window.innerWidth * 0.44, 620);
+  });
+  const minimum = Math.min(280, available / 2);
+  const maximum = Math.max(minimum, available - Math.min(320, available / 2) - 8);
+  const width = Math.round(Math.max(minimum, Math.min(maximum, preferred)));
+  useEffect(() => {
+    const parent = panel.current!.parentElement!;
+    const observer = new ResizeObserver(() => setAvailable(parent.clientWidth));
+    observer.observe(parent);
+    return () => {
+      observer.disconnect();
+      delete document.body.dataset.paneResizing;
+    };
+  }, []);
+  const resize = (value: number) => {
+    const next = Math.round(Math.max(minimum, Math.min(maximum, value)));
+    setPreferred(next);
+    localStorage.setItem("wb:side-width", String(next));
+  };
+  const stop = () => {
+    drag.current = null;
+    delete document.body.dataset.paneResizing;
+  };
+  return (
+    <>
+      {/* biome-ignore lint/a11y/useSemanticElements: interactive splitter, not a thematic break. */}
+      <div
+        role="separator"
+        aria-label="Resize side panel"
+        aria-orientation="vertical"
+        aria-valuemin={Math.round(minimum)}
+        aria-valuemax={Math.round(maximum)}
+        aria-valuenow={width}
+        tabIndex={0}
+        title="Drag to resize · Arrow keys to adjust · Double-click to reset"
+        className="group relative w-2 shrink-0 touch-none cursor-col-resize bg-wb-bg outline-none hover:bg-wb-accent/20 focus-visible:bg-wb-accent/30"
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          e.preventDefault();
+          e.currentTarget.focus();
+          e.currentTarget.setPointerCapture(e.pointerId);
+          drag.current = { x: e.clientX, width };
+          document.body.dataset.paneResizing = "vertical";
+        }}
+        onPointerMove={(e) => {
+          if (drag.current) resize(drag.current.width + drag.current.x - e.clientX);
+        }}
+        onPointerUp={stop}
+        onPointerCancel={stop}
+        onLostPointerCapture={stop}
+        onDoubleClick={() => resize(Math.min(window.innerWidth * 0.44, 620))}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+            e.preventDefault();
+            resize(width + (e.key === "ArrowLeft" ? 1 : -1) * (e.shiftKey ? 80 : 20));
+          } else if (e.key === "Home" || e.key === "End") {
+            e.preventDefault();
+            resize(e.key === "Home" ? minimum : maximum);
+          }
+        }}
+      >
+        <span className="absolute inset-y-0 left-1/2 w-px bg-wb-border group-hover:bg-wb-accent" />
+      </div>
+      <aside ref={panel} aria-label="Workspace tools" style={{ width }} className="flex min-w-0 shrink-0 flex-col">
+        {children}
+      </aside>
+    </>
   );
 }
 
