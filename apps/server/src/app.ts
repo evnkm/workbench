@@ -50,6 +50,7 @@ import {
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { Auth } from "./auth.ts";
+import type { PushNotifications } from "./notifications.ts";
 import type { Previews } from "./previews.ts";
 import { captureHistory } from "./terminals.ts";
 import type { WorkerLink } from "./worker-link.ts";
@@ -61,6 +62,7 @@ export type AppDeps = {
   link: WorkerLink;
   log: Logger;
   previews?: Previews;
+  notifications?: PushNotifications;
   /** Extra routers mounted under /api (processes, jobs, previews). */
   extend?: (app: Hono) => void;
 };
@@ -68,7 +70,7 @@ export type AppDeps = {
 const HEARTBEAT_MS = 15_000;
 const STALE_WORKER_MS = 20_000;
 
-export function createApp({ db, config, auth, link, log, previews, extend }: AppDeps) {
+export function createApp({ db, config, auth, link, log, previews, notifications, extend }: AppDeps) {
   const app = new Hono();
 
   app.onError((err, c) => {
@@ -99,6 +101,8 @@ export function createApp({ db, config, auth, link, log, previews, extend }: App
     return c.json({ ok: true });
   });
   app.get("/api/auth/session", (c) => c.json({ ok: true }));
+
+  notifications?.routes(app, auth);
 
   // ---------------------------------------------------------------- state
 

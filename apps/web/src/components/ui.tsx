@@ -110,6 +110,7 @@ export function Dialog({
   return (
     <dialog
       ref={ref}
+      aria-label={title}
       onClose={onClose}
       // Clicking the backdrop closes; Escape is handled natively by <dialog>.
       onClick={(e) => e.target === ref.current && onClose()}

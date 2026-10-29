@@ -9,6 +9,7 @@ import {
   type ConversationItem,
   DETAIL_EVENT_TYPES,
   type EventBody,
+  isTerminalRunState,
   nowIso,
   type PendingInput,
   type ProcessSession,
@@ -291,6 +292,7 @@ export function updateConversation(db: Database, id: string, patch: Partial<Conv
 /** The worker checks that no turn or job is active before deleting its conversation. */
 export function deleteConversation(db: Database, id: string) {
   db.tx(() => {
+    db.run("DELETE FROM push_deliveries WHERE run_id IN (SELECT id FROM runs WHERE conversation_id = :id)", { id });
     db.run("DELETE FROM pending_inputs WHERE conversation_id = :id", { id });
     db.run("DELETE FROM items WHERE conversation_id = :id", { id });
     // Job execution history and artifacts belong to the job, independently of its conversation.
@@ -334,6 +336,7 @@ export const listConversationRuns = (db: Database, conversationId: string, limit
 
 export function saveRun(db: Database, run: Run, owner: string | null = null): Run {
   db.tx(() => {
+    const previous = getRun(db, run.id);
     db.run(
       `INSERT INTO runs (id, kind, workspace_id, conversation_id, job_id, state, provider_turn_id, summary, stop_reason,
          error, attempt, owner, created_at, started_at, ended_at)
@@ -362,6 +365,31 @@ export function saveRun(db: Database, run: Run, owner: string | null = null): Ru
       },
     );
     appendEvent(db, { type: "run.upserted", run }, run.conversationId);
+    // Persist delivery with the terminal transition, before the worker wakes the API.
+    // Snapshot reads, duplicate completions, and removing an unsent message never alert.
+    if (
+      run.kind === "agent_turn" &&
+      run.conversationId &&
+      run.workspaceId &&
+      previous &&
+      !isTerminalRunState(previous.state) &&
+      isTerminalRunState(run.state) &&
+      previous.state !== "queued"
+    ) {
+      const conversation = getConversation(db, run.conversationId);
+      const payload = JSON.stringify({
+        title: run.state === "succeeded" ? "Codex finished" : `Codex turn ${run.state}`,
+        body: conversation?.title ?? "Conversation",
+        tag: run.id,
+        url: `/w/${run.workspaceId}/c/${run.conversationId}`,
+      });
+      db.run(
+        `INSERT OR IGNORE INTO push_deliveries (endpoint, run_id, payload, next_attempt_at)
+        SELECT p.endpoint, :run, :payload, :now FROM push_subscriptions p
+        JOIN auth_sessions a ON a.token_hash = p.session_hash WHERE a.expires_at > :iso`,
+        { run: run.id, payload, now: Date.now(), iso: nowIso() },
+      );
+    }
   });
   return run;
 }

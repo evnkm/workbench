@@ -9,6 +9,7 @@ import { createLogger, Database, loadConfig, pruneAuthSessions } from "@workbenc
 import type { Context } from "hono";
 import { createApp } from "./app.ts";
 import { Auth } from "./auth.ts";
+import { PushNotifications } from "./notifications.ts";
 import { Previews } from "./previews.ts";
 import { attachTerminals } from "./terminals.ts";
 import { WorkerLink } from "./worker-link.ts";
@@ -22,7 +23,9 @@ const link = new WorkerLink(config.workerSocket, log);
 link.start();
 
 const previews = new Previews(db, config, log);
-const app = createApp({ db, config, auth, link, log, previews });
+const notifications = new PushNotifications(db, config, log);
+notifications.start();
+const app = createApp({ db, config, auth, link, log, previews, notifications });
 
 // Static web assets with an SPA fallback. Hashed assets are immutable.
 if (existsSync(config.webDist)) {
@@ -64,6 +67,7 @@ function shutdown(signal: string) {
   log.info("server stopping", { signal });
   clearInterval(sweeper);
   clearInterval(previewSweeper);
+  notifications.stop();
   previews.close();
   link.close();
   server.close();

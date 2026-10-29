@@ -39,6 +39,10 @@ manifest.schemaVersion = db.get<{ user_version: number }>("PRAGMA user_version")
 if (existsSync(join(config.stateDir, "media")))
   cpSync(join(config.stateDir, "media"), join(out, "media"), { recursive: true });
 
+// Preserve the application identity used by existing browser push subscriptions.
+if (existsSync(join(config.stateDir, "push-keys.json")))
+  cpSync(join(config.stateDir, "push-keys.json"), join(out, "push-keys.json"));
+
 // 2. Codex provider state.
 const codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex");
 const codexOut = join(out, "codex");

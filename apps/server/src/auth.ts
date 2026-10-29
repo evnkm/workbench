@@ -75,6 +75,11 @@ export class Auth {
     deleteCookie(c, SESSION_COOKIE, { path: "/" });
   }
 
+  sessionHash(c: Context): string | null {
+    const token = getCookie(c, SESSION_COOKIE);
+    return token ? tokenHash(token) : null;
+  }
+
   authenticated(c: Context): boolean {
     const token = getCookie(c, SESSION_COOKIE);
     return Boolean(token && validAuthSession(this.db, tokenHash(token)));

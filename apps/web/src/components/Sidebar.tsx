@@ -8,6 +8,7 @@ import { sendCommand } from "../lib/api.ts";
 import { useUnreadCount } from "../lib/hooks.ts";
 import { navigate, type Route } from "../lib/router.ts";
 import { logout, useStore } from "../lib/store.ts";
+import { NotificationSettings } from "./NotificationSettings.tsx";
 import { ThemeSelect } from "./ThemeSelect.tsx";
 import { Button, Dialog, ErrorText, Field, IconButton, inputClass, StatusIndicator } from "./ui.tsx";
 
@@ -200,6 +201,7 @@ export function Sidebar({ route, onNavigate }: { route: Route; onNavigate?: () =
       </div>
       <div className="flex shrink-0 items-center justify-between border-t border-wb-border px-3 py-2">
         <span className="text-[12px] text-neutral-400">Appearance</span>
+        <NotificationSettings />
         <ThemeSelect />
       </div>
       <div className="flex shrink-0 items-center justify-between border-t border-wb-border px-2 py-1.5 pb-safe">

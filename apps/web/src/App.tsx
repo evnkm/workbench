@@ -1,11 +1,13 @@
 import clsx from "clsx";
 import { AlertTriangle, Menu, WifiOff } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
+import { NotificationSettings } from "./components/NotificationSettings.tsx";
 import { Sidebar, useWorkspaceActivity } from "./components/Sidebar.tsx";
 import { ThemeSelect } from "./components/ThemeSelect.tsx";
 import { Button, inputClass } from "./components/ui.tsx";
 import { WorkspaceView } from "./components/WorkspaceView.tsx";
 import { useUnreadCount } from "./lib/hooks.ts";
+import { initializeSounds } from "./lib/notifications.ts";
 import { navigate, useRoute } from "./lib/router.ts";
 import { boot, login, openConversation, useStore } from "./lib/store.ts";
 
@@ -66,6 +68,7 @@ function Login() {
 }
 
 function Shell() {
+  useEffect(initializeSounds, []);
   const route = useRoute();
   const loaded = useStore((s) => s.loaded);
   const workspaces = useStore((s) => s.workspaces);
@@ -101,6 +104,7 @@ function Shell() {
           <div className="truncate text-[14px] font-semibold text-neutral-100">{title}</div>
           {subtitle && <div className="truncate text-[11px] text-neutral-500">{subtitle}</div>}
         </div>
+        <NotificationSettings />
         <ThemeSelect />
       </header>
       {drawer && (

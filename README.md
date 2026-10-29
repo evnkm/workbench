@@ -51,6 +51,20 @@ after a restart is shown as failed with the message retained, rather than
 resending something Codex may already have received. The pending list above the
 message box lets you remove unsent messages; Stop interrupts the current turn.
 
+Open the bell beside Appearance on desktop or in the phone header for
+**Turn notifications**. Enable a completion chime, device notifications, or both;
+use the test buttons to check this browser. Push notifications arrive even when
+Workbench is closed and open the corresponding conversation when tapped.
+Device notification delivery is tied to the signed-in session and stops on logout
+or session expiry. Settings and permission are specific to each device. On iPhone
+and iPad (iOS 16.4+), add Workbench to the Home Screen and enable notifications in
+that installed app. HTTPS is required outside localhost.
+
+Completion push deliveries are committed with run transitions and sent by the
+API from a durable outbox. VAPID identity lives in `push-keys.json` under the state
+directory and is included in backups. The push-only service worker never caches
+conversation data or authenticated pages.
+
 It started from [the phased implementation plan](IMPLEMENTATION_PLAN.md) and reuses design and workspace ideas from [Canopy](../canopy) (see [NOTICE](NOTICE)).
 
 ## Status

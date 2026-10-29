@@ -16,6 +16,7 @@ import type {
 } from "@workbench/contracts";
 import { useSyncExternalStore } from "react";
 import { api, setUnauthorizedHandler } from "./api.ts";
+import { onTurnCompletion } from "./notifications.ts";
 
 export type WorkerInfo = WorkerStatus & { connected: boolean; stale: boolean };
 
@@ -204,6 +205,7 @@ function apply(e: AppEvent) {
     }
     if (e.seq <= conv.baseSeq) return;
   }
+  if (e.type === "run.upserted") onTurnCompletion(state.runs[e.run.id], e.run);
   set((s) => ({ ...reduce(s, e), lastSeq: Math.max(s.lastSeq, e.seq), connection: "live" }));
 }
 
