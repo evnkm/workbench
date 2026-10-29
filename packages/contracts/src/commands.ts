@@ -46,11 +46,36 @@ export const commandSchemas = {
   }),
   "conversation.rename": z.object({ conversationId: id, title: name }),
   "conversation.delete": z.object({ conversationId: id }),
-  "turn.start": z.object({
+  "conversation.configure": z
+    .object({
+      conversationId: id,
+      model: z.string().min(1).max(100).optional(),
+      reasoningEffort: z.string().min(1).max(40).nullable().optional(),
+      serviceTier: z.string().min(1).max(100).nullable().optional(),
+      approvalPolicy: z.enum(APPROVAL_POLICIES).optional(),
+    })
+    .refine((p) => Object.keys(p).length > 1, "Choose a setting to change."),
+  "conversation.inspect": z.object({
     conversationId: id,
-    text: z.string().min(1).max(100_000),
-    mode: z.enum(["default", "plan"]).default("default"),
+    view: z.enum(["models", "commands", "status", "skills", "mcp", "apps", "plugins", "hooks", "usage"]),
   }),
+  "conversation.action": z.object({ conversationId: id, action: z.enum(["compact", "fork", "stop-background"]) }),
+  "turn.start": z
+    .object({
+      conversationId: id,
+      text: z.string().min(1).max(100_000),
+      mode: z.enum(["default", "plan", "review"]).default("default"),
+      reviewTarget: z
+        .discriminatedUnion("type", [
+          z.object({ type: z.literal("uncommittedChanges") }),
+          z.object({ type: z.literal("baseBranch"), branch: z.string().trim().min(1).max(200) }),
+        ])
+        .optional(),
+    })
+    .refine(
+      (p) => (p.mode === "review" ? p.reviewTarget !== undefined : p.reviewTarget === undefined),
+      "A review target is required only for review mode.",
+    ),
   "turn.interrupt": z.object({ conversationId: id, runId: id }),
   "input.respond": z.object({
     inputId: id,

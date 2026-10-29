@@ -225,4 +225,10 @@ CREATE INDEX artifacts_run ON artifacts(run_id);
     name: "project run command",
     sql: `ALTER TABLE projects ADD COLUMN run_command TEXT;`,
   },
+  {
+    version: 5,
+    name: "conversation inference settings",
+    sql: `ALTER TABLE conversations ADD COLUMN reasoning_effort TEXT;
+ALTER TABLE conversations ADD COLUMN service_tier TEXT;`,
+  },
 ];

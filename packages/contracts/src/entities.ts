@@ -1,5 +1,7 @@
 // Durable entities as returned by the API and carried in events. Timestamps
 // are ISO 8601 strings in UTC.
+
+import type { ReviewTarget } from "./codex.ts";
 import type {
   ApprovalPolicy,
   CommandState,
@@ -47,6 +49,8 @@ export type Conversation = {
   providerThreadId: string | null;
   title: string;
   model: string | null;
+  reasoningEffort: string | null;
+  serviceTier: string | null;
   approvalPolicy: ApprovalPolicy;
   createdAt: string;
   updatedAt: string;
@@ -101,6 +105,7 @@ export type ConversationImage = {
 
 /** Kind-specific item payload. Fields are optional because providers differ. */
 export type ItemData = {
+  reviewTarget?: ReviewTarget;
   images?: ConversationImage[];
   text?: string;
   /** agent_message phase, for example commentary or final_answer. */

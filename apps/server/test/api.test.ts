@@ -219,6 +219,8 @@ test("conversation images require auth and a stored image reference, and survive
     providerThreadId: null,
     title: "Images",
     model: null,
+    reasoningEffort: null,
+    serviceTier: null,
     approvalPolicy: "never",
     createdAt: now,
     updatedAt: now,

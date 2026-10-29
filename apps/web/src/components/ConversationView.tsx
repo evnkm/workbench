@@ -141,7 +141,7 @@ export function ConversationView({ workspace }: { workspace: Workspace }) {
         )}
       </div>
       {openInputs.length > 0 && <InputPanel inputs={openInputs} />}
-      <Composer conversationId={conv.id} workspace={workspace} activeRun={activeRun ?? null} />
+      <Composer key={conv.id} conversation={conversation} workspace={workspace} activeRun={activeRun ?? null} />
     </div>
   );
 }

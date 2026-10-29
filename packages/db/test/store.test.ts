@@ -71,6 +71,8 @@ function seed(db: Database) {
     providerThreadId: null,
     title: "c",
     model: null,
+    reasoningEffort: null,
+    serviceTier: null,
     approvalPolicy: "never",
     createdAt: now,
     updatedAt: now,
@@ -98,7 +100,7 @@ const run = (conversationId: string, workspaceId: string, state: Run["state"] = 
 
 test("an empty database migrates to the latest version and is idempotent", () => {
   const db = tempDb();
-  assert.equal(db.migrate(), 4);
+  assert.equal(db.migrate(), 5);
   assert.deepEqual(listProjects(db), []);
 });
 
@@ -321,6 +323,6 @@ test("a backup restores into a separate location", () => {
   const target = join(mkdtempSync(join(tmpdir(), "wb-backup-")), "copy.sqlite");
   db.backupTo(target);
   const restored = new Database(target);
-  assert.equal(restored.migrate(), 4);
+  assert.equal(restored.migrate(), 5);
   assert.equal(listProjects(restored).length, 1);
 });

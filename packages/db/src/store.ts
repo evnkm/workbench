@@ -62,6 +62,8 @@ export const toConversation = (r: Row): Conversation => ({
   providerThreadId: str(r.provider_thread_id),
   title: String(r.title),
   model: str(r.model),
+  reasoningEffort: str(r.reasoning_effort),
+  serviceTier: str(r.service_tier),
   approvalPolicy: r.approval_policy as Conversation["approvalPolicy"],
   createdAt: String(r.created_at),
   updatedAt: String(r.updated_at),
@@ -252,10 +254,11 @@ export function saveConversation(db: Database, c: Conversation): Conversation {
   db.tx(() => {
     db.run(
       `INSERT INTO conversations (id, workspace_id, provider, provider_thread_id, title, model, approval_policy,
-         created_at, updated_at, last_activity_at)
-       VALUES (:id, :ws, :provider, :thread, :title, :model, :policy, :created, :updated, :activity)
+         created_at, updated_at, last_activity_at, reasoning_effort, service_tier)
+       VALUES (:id, :ws, :provider, :thread, :title, :model, :policy, :created, :updated, :activity, :effort, :tier)
        ON CONFLICT(id) DO UPDATE SET provider_thread_id = excluded.provider_thread_id, title = excluded.title,
-         model = excluded.model, approval_policy = excluded.approval_policy, updated_at = excluded.updated_at,
+         model = excluded.model, reasoning_effort = excluded.reasoning_effort, service_tier = excluded.service_tier,
+         approval_policy = excluded.approval_policy, updated_at = excluded.updated_at,
          last_activity_at = excluded.last_activity_at`,
       {
         id: c.id,
@@ -264,6 +267,8 @@ export function saveConversation(db: Database, c: Conversation): Conversation {
         thread: c.providerThreadId,
         title: c.title,
         model: c.model,
+        effort: c.reasoningEffort,
+        tier: c.serviceTier,
         policy: c.approvalPolicy,
         created: c.createdAt,
         updated: c.updatedAt,

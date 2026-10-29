@@ -23,6 +23,16 @@ Use the X on a conversation tab to delete its history. Active or queued runs mus
 be stopped first. Deletion syncs to other browsers; job execution history and
 artifacts are retained independently of the conversation.
 
+Type `/` at the start of the message box for a searchable command menu on desktop
+or phone. Select with the arrow keys and Enter/Tab, or tap an option; Escape closes
+the menu. `/model`, `/reasoning`, `/fast`, and `/permissions` save conversation
+settings for subsequent turns. Model choices, reasoning efforts, and Fast tiers
+come from the connected Codex account. `/review`, `/compact`, and `/fork` use native
+Codex operations; other commands open workspace tools, session information, or
+skill/app pickers. Commands requiring the terminal, IDE, or a feature Workbench
+does not yet integrate explain their availability rather than being sent as prompts.
+Paths such as `/home/ubuntu/project` remain ordinary message text.
+
 It started from [the phased implementation plan](IMPLEMENTATION_PLAN.md) and reuses design and workspace ideas from [Canopy](../canopy) (see [NOTICE](NOTICE)).
 
 ## Status
@@ -64,5 +74,7 @@ To check rich conversation rendering against a running UI without real Codex cal
 run `node e2e/rich-content.e2e.mjs` (or set `B` to the UI's development URL).
 `node e2e/conversation-deletion.e2e.mjs` checks tab deletion and cross-browser
 updates on desktop and mobile using disposable API fixtures.
+`node e2e/slash-commands.e2e.mjs` checks command completion, settings, and active-turn
+behavior on both layouts without real Codex calls.
 
 Operations (deploys, backups, restores, recovery, Codex upgrades) are described in [docs/operations/setup.md](docs/operations/setup.md).

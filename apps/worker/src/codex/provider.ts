@@ -2,6 +2,7 @@
 // docs/decisions/0002-codex-app-server.md for the observed protocol behavior
 // this module relies on.
 import {
+  type CommandPayload,
   type Conversation,
   type ConversationItem,
   isTerminalRunState,
@@ -33,10 +34,14 @@ import {
 import { markdownImages, retainImages } from "@workbench/runtime";
 import { CommandError, type Handlers } from "../commands.ts";
 import type { WorkerContext } from "../context.ts";
+import { saveFork } from "../fork.ts";
 import { exec, sleep } from "../util.ts";
 import { AppServer } from "./appserver.ts";
 import { MAX_OUTPUT_CHARS, mapItem, mapServerRequest, replyFor, runStateForTurn } from "./mapping.ts";
+import { readMenu, readModels } from "./menu.ts";
 import type { RequestId } from "./protocol/RequestId.ts";
+import type { ReviewStartResponse } from "./protocol/v2/ReviewStartResponse.ts";
+import type { ThreadForkResponse } from "./protocol/v2/ThreadForkResponse.ts";
 import type { ThreadItem } from "./protocol/v2/ThreadItem.ts";
 import type { ThreadStartResponse } from "./protocol/v2/ThreadStartResponse.ts";
 import type { Turn } from "./protocol/v2/Turn.ts";
@@ -95,6 +100,18 @@ export class CodexProvider {
         key: (p) => `conversation:${p.conversationId}`,
         run: (p) => this.deleteConversation(p),
       },
+      "conversation.configure": {
+        key: (p) => `conversation:${p.conversationId}`,
+        run: (p) => this.configureConversation(p),
+      },
+      "conversation.inspect": {
+        key: (p) => `conversation:${p.conversationId}`,
+        run: async (p) => {
+          const conv = this.requireConversation(p.conversationId);
+          return readMenu(await this.ensureServer(), conv, getWorkspace(this.ctx.db, conv.workspaceId)!, p.view);
+        },
+      },
+      "conversation.action": { key: (p) => `conversation:${p.conversationId}`, run: (p) => this.conversationAction(p) },
       "turn.start": { key: (p) => `conversation:${p.conversationId}`, run: (p) => this.submitTurn(p) },
       "turn.interrupt": { key: (p) => `conversation:${p.conversationId}`, run: (p) => this.interrupt(p) },
       "input.respond": { key: (p) => `input:${p.inputId}`, run: (p) => this.respond(p) },
@@ -295,6 +312,8 @@ export class CodexProvider {
       providerThreadId: null,
       title: p.title || "New conversation",
       model: p.model ?? null,
+      reasoningEffort: null,
+      serviceTier: null,
       approvalPolicy: p.approvalPolicy,
       createdAt: now,
       updatedAt: now,
@@ -324,13 +343,64 @@ export class CodexProvider {
     return { conversationId: conv.id };
   }
 
+  async configureConversation(p: CommandPayload<"conversation.configure">) {
+    const conv = this.requireConversation(p.conversationId);
+    const { conversationId: _id, ...patch } = p;
+    if (p.model !== undefined || p.reasoningEffort !== undefined || p.serviceTier !== undefined) {
+      const models = await readModels(await this.ensureServer());
+      const model =
+        models.find((m) => m.model === (p.model ?? conv.model)) ??
+        (p.model === undefined && conv.model === null ? models.find((m) => m.isDefault) : undefined);
+      if (!model) throw new CommandError("This model is not available in the connected Codex account.");
+      if (p.model !== undefined && p.model !== conv.model) {
+        patch.reasoningEffort = p.reasoningEffort ?? (model.efforts.length ? model.defaultEffort : null);
+        patch.serviceTier = p.serviceTier ?? null;
+      }
+      if (patch.reasoningEffort != null && !model.efforts.some((e) => e.effort === patch.reasoningEffort)) {
+        throw new CommandError("This model does not support that reasoning effort.");
+      }
+      if (patch.serviceTier && !model.serviceTiers.some((tier) => tier.id === patch.serviceTier)) {
+        throw new CommandError("This model does not offer that service tier.");
+      }
+    }
+    // Workbench owns defaults. Apply them at the next turn boundary without disturbing an active turn.
+    updateConversation(this.ctx.db, conv.id, patch);
+    this.ctx.published();
+    return { conversationId: conv.id };
+  }
+
+  async conversationAction(p: CommandPayload<"conversation.action">) {
+    const db = this.ctx.db;
+    const conv = this.requireConversation(p.conversationId);
+    if (p.action !== "stop-background" && listActiveRuns(db).some((r) => r.conversationId === conv.id)) {
+      throw new CommandError("Wait for the current turn to finish or stop it first.");
+    }
+    const threadId = await this.loadThread(conv, getWorkspace(db, conv.workspaceId)!);
+    const server = await this.ensureServer();
+    if (p.action === "stop-background") {
+      await server.request("thread/backgroundTerminals/clean", { threadId });
+    } else if (p.action === "compact") {
+      await server.request("thread/compact/start", { threadId });
+    } else {
+      const fork = await server.request<ThreadForkResponse>("thread/fork", {
+        threadId,
+        excludeTurns: true,
+        deferGoalContinuation: true,
+      });
+      this.loadedThreads.add(fork.thread.id);
+      return saveFork(this.ctx, conv, { providerThreadId: fork.thread.id, model: fork.model });
+    }
+    this.ctx.published();
+    return { conversationId: conv.id };
+  }
+
   private workspaceBusy(workspaceId: string, exceptRun?: string) {
     return listActiveRuns(this.ctx.db).some(
       (r) => r.kind === "agent_turn" && r.workspaceId === workspaceId && r.state !== "queued" && r.id !== exceptRun,
     );
   }
 
-  async submitTurn(p: { conversationId: string; text: string; mode: "default" | "plan" }) {
+  async submitTurn(p: CommandPayload<"turn.start">) {
     const db = this.ctx.db;
     const conv = this.requireConversation(p.conversationId);
     const w = getWorkspace(db, conv.workspaceId)!;
@@ -366,7 +436,11 @@ export class CodexProvider {
           providerItemId: null,
           kind: "user_message",
           status: "completed",
-          data: { text: p.text, phase: p.mode === "plan" ? "plan" : null },
+          data: {
+            text: p.text,
+            phase: p.mode === "plan" ? "plan" : null,
+            reviewTarget: p.reviewTarget,
+          },
           createdAt: now,
           updatedAt: now,
         });
@@ -390,16 +464,21 @@ export class CodexProvider {
     const server = await this.ensureServer();
     const common = {
       cwd: w.worktreePath,
+      model: conv.model ?? undefined,
+      serviceTier: conv.serviceTier,
+      config: conv.reasoningEffort ? { model_reasoning_effort: conv.reasoningEffort } : undefined,
       approvalPolicy: conv.approvalPolicy,
       sandbox: "danger-full-access" as const,
     };
     if (!conv.providerThreadId) {
       const r = await server.request<ThreadStartResponse>("thread/start", {
         ...common,
-        model: conv.model ?? undefined,
         serviceName: "workbench",
       });
-      updateConversation(this.ctx.db, conv.id, { providerThreadId: r.thread.id, model: r.model });
+      updateConversation(this.ctx.db, conv.id, {
+        providerThreadId: r.thread.id,
+        model: getConversation(this.ctx.db, conv.id)!.model ?? r.model,
+      });
       this.ctx.published();
       this.loadedThreads.add(r.thread.id);
       return r.thread.id;
@@ -431,14 +510,35 @@ export class CodexProvider {
         input: [{ type: "text", text: item?.data.text ?? run.summary, text_elements: [] }],
         clientUserMessageId: item?.id ?? null,
         approvalPolicy: fresh.approvalPolicy,
+        model: fresh.model,
+        effort: fresh.reasoningEffort ?? undefined,
+        serviceTier: fresh.serviceTier,
+        collaborationMode: {
+          // Codex modes are sticky; explicitly leave Plan for an ordinary turn.
+          mode: item?.data.phase === "plan" ? "plan" : "default",
+          settings: {
+            model: fresh.model,
+            reasoning_effort: fresh.reasoningEffort,
+            developer_instructions: null,
+          },
+        },
       };
-      if (item?.data.phase === "plan") {
-        params.collaborationMode = {
-          mode: "plan",
-          settings: { model: fresh.model, reasoning_effort: null, developer_instructions: null },
-        };
+      if (item?.data.reviewTarget) {
+        await this.server!.request("thread/settings/update", {
+          threadId,
+          model: fresh.model,
+          effort: fresh.reasoningEffort ?? undefined,
+          serviceTier: fresh.serviceTier,
+          approvalPolicy: fresh.approvalPolicy,
+        });
       }
-      const res = await this.server!.request<TurnStartResponse>("turn/start", params);
+      const res = item?.data.reviewTarget
+        ? await this.server!.request<ReviewStartResponse>("review/start", {
+            threadId,
+            target: item.data.reviewTarget,
+            delivery: "inline",
+          })
+        : await this.server!.request<TurnStartResponse>("turn/start", params);
       this.bindTurn(runId, res.turn.id);
       const cur = getRun(db, runId)!;
       if (this.interruptRequested.has(runId) && !isTerminalRunState(cur.state)) {

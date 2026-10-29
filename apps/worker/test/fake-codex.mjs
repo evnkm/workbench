@@ -48,7 +48,7 @@ function finish(thread, turn, status, error = null) {
   });
 }
 
-async function runTurn(thread, turn, text, clientId) {
+async function runTurn(thread, turn, text, clientId, settings = {}) {
   const t = { threadId: thread.id, turnId: turn.id };
   notify("turn/started", { threadId: thread.id, turn: { id: turn.id, items: [], status: "inProgress" } });
   notify("thread/status/changed", { threadId: thread.id, status: { type: "active", activeFlags: [] } });
@@ -114,6 +114,7 @@ async function runTurn(thread, turn, text, clientId) {
     });
   }
   let reply = "Done.";
+  if (text === "report settings") reply = JSON.stringify(settings);
   if (text.includes("ask")) {
     const res = await request("item/tool/requestUserInput", {
       ...t,
@@ -185,6 +186,79 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   const p = m.params ?? {};
   const reply = (result) => send({ id: m.id, result });
   switch (m.method) {
+    case "model/list":
+      return reply({
+        data: p.cursor
+          ? [
+              {
+                model: "other-model",
+                displayName: "Other model",
+                description: "No Fast tier",
+                hidden: false,
+                isDefault: false,
+                defaultReasoningEffort: "low",
+                supportedReasoningEfforts: [{ reasoningEffort: "low", description: "Low effort" }],
+                serviceTiers: [],
+              },
+              { model: "hidden-model", hidden: true },
+            ]
+          : [
+              {
+                model: "fake-model",
+                displayName: "Test model",
+                description: "Account-specific test model",
+                hidden: false,
+                isDefault: true,
+                defaultReasoningEffort: "medium",
+                supportedReasoningEfforts: [
+                  { reasoningEffort: "medium", description: "Balanced" },
+                  { reasoningEffort: "high", description: "More reasoning" },
+                ],
+                serviceTiers: [{ id: "priority", name: "Fast", description: "Faster execution with additional usage" }],
+              },
+            ],
+        nextCursor: p.cursor ? null : "second",
+      });
+    case "account/rateLimits/read":
+      return reply({
+        rateLimitsByLimitId: null,
+        rateLimits: { limitName: "Codex", primary: { usedPercent: 12, resetsAt: null }, secondary: null },
+      });
+    case "account/tokenUsage/read":
+      return reply({ summary: { lifetimeTokens: 1234, peakDailyTokens: 100, currentStreakDays: 2 } });
+    case "skills/list":
+      return reply({
+        data: [
+          { cwd: p.cwds[0], errors: [], skills: [{ name: "test-skill", description: "Test skill", enabled: true }] },
+        ],
+      });
+    case "app/list":
+      return reply({
+        data: [
+          { id: "test-app", name: "Test app", description: "App description", isAccessible: true, isEnabled: true },
+        ],
+        nextCursor: null,
+      });
+    case "mcpServerStatus/list":
+      return reply({
+        data: [{ name: "test-server", runtimeStatus: "connected", tools: { tool: {} }, toolsError: null }],
+        nextCursor: null,
+      });
+    case "plugin/installed":
+      return reply({
+        marketplaces: [{ plugins: [{ name: "Test plugin", installed: true, enabled: true }] }],
+        marketplaceLoadErrors: [],
+      });
+    case "hooks/list":
+      return reply({
+        data: [
+          {
+            errors: [],
+            warnings: [],
+            hooks: [{ eventName: "SessionStart", enabled: true, trustStatus: "trusted", sourcePath: "/hooks.json" }],
+          },
+        ],
+      });
     case "initialize":
       return reply({ userAgent: "fake-codex/0.160.0", codexHome: "/tmp", platformFamily: "unix", platformOs: "linux" });
     case "initialized":
@@ -192,7 +266,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     case "thread/start": {
       const th = { id: id("thread"), cwd: p.cwd, turns: [], active: null };
       threads.set(th.id, th);
-      return reply({ thread: { id: th.id, turns: [] }, model: "fake-model", cwd: p.cwd });
+      return reply({ thread: { id: th.id, turns: [] }, model: p.model ?? "fake-model", cwd: p.cwd });
     }
     case "thread/resume": {
       if (!threads.has(p.threadId)) threads.set(p.threadId, { id: p.threadId, cwd: p.cwd, turns: [], active: null });
@@ -205,13 +279,37 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         nextCursor: null,
       });
     }
+    case "thread/settings/update":
+      threads.get(p.threadId).settings = p;
+      return reply({});
+    case "thread/compact/start":
+      notify("item/completed", { threadId: p.threadId, item: { type: "contextCompaction", id: id("compact") } });
+      return reply({});
+    case "thread/backgroundTerminals/clean":
+      return reply({});
+    case "thread/fork": {
+      const source = threads.get(p.threadId);
+      const th = { ...source, id: id("thread"), active: null, turns: [...source.turns] };
+      threads.set(th.id, th);
+      return reply({ thread: { id: th.id }, model: source.settings?.model ?? "fake-model" });
+    }
+    case "review/start": {
+      const th = threads.get(p.threadId);
+      const turn = { id: id("turn"), items: [], status: "inProgress", done: false };
+      th.turns.push(turn);
+      th.active = turn;
+      reply({ turn: { id: turn.id }, reviewThreadId: th.id });
+      void runTurn(th, turn, "report settings", undefined, { target: p.target, ...th.settings });
+      return;
+    }
     case "turn/start": {
       const th = threads.get(p.threadId);
       const turn = { id: id("turn"), items: [], status: "inProgress", done: false };
       th.turns.push(turn);
       th.active = turn;
       reply({ turn: { id: turn.id, items: [], status: "inProgress" } });
-      void runTurn(th, turn, p.input[0].text, p.clientUserMessageId);
+      th.settings = p;
+      void runTurn(th, turn, p.input[0].text, p.clientUserMessageId, p);
       return;
     }
     case "turn/interrupt": {

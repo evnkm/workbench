@@ -34,6 +34,7 @@ export type PendingInputState = (typeof PENDING_INPUT_STATES)[number];
 
 export const PROVIDERS = ["codex", "claude"] as const;
 export type Provider = (typeof PROVIDERS)[number];
+export const PROVIDER_LABELS = { codex: "Codex", claude: "Claude" } as const satisfies Record<Provider, string>;
 
 export const APPROVAL_POLICIES = ["never", "untrusted", "on-request"] as const;
 export type ApprovalPolicy = (typeof APPROVAL_POLICIES)[number];

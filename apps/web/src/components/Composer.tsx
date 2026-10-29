@@ -1,33 +1,58 @@
-import type { Run, Workspace } from "@workbench/contracts";
+import type { Conversation, InspectResult, Run, Workspace } from "@workbench/contracts";
 import clsx from "clsx";
 import { ArrowUp, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { sendCommand } from "../lib/api.ts";
+import { navigate } from "../lib/router.ts";
+import { parseSlash, SLASH_COMMANDS, type SlashCommand } from "../lib/slash-commands.ts";
 import { useStore } from "../lib/store.ts";
+import { SlashCommandDialog, type SlashPanel } from "./SlashCommandDialog.tsx";
+import { Dialog } from "./ui.tsx";
 
 const draftKey = (id: string) => `wb:draft:${id}`;
 const coarsePointer = () => window.matchMedia("(pointer: coarse)").matches;
 
 export function Composer({
-  conversationId,
+  conversation,
   workspace,
   activeRun,
 }: {
-  conversationId: string;
+  conversation: Conversation;
   workspace: Workspace;
   activeRun: Run | null;
 }) {
+  const conversationId = conversation.id;
   const [text, setText] = useState(() => localStorage.getItem(draftKey(conversationId)) ?? "");
-  const [plan, setPlan] = useState(false);
+  const [plan, setPlan] = useState(() => localStorage.getItem(`wb:plan:${conversationId}`) === "1");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   const codex = useStore((s) => s.worker?.codex);
+  const detail = useStore((s) => s.conversation);
+  const [focused, setFocused] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  const [selected, setSelected] = useState(0);
+  const [panel, setPanel] = useState<SlashPanel | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [confirmation, setConfirmation] = useState<string | null>(null);
+  const slash = parseSlash(text);
+  const matches = slash ? SLASH_COMMANDS.filter((c) => c.name.startsWith(slash.query)) : [];
+  // The menu closes once the command name is followed by a space, so arguments can be typed.
+  const menuOpen = focused && slash !== null && !/\s/.test(text.trimStart()) && !dismissed;
+  const listId = `slash-${conversationId}`;
 
   useEffect(() => {
-    setText(localStorage.getItem(draftKey(conversationId)) ?? "");
-    setError(null);
-  }, [conversationId]);
+    localStorage.setItem(`wb:plan:${conversationId}`, plan ? "1" : "0");
+  }, [conversationId, plan]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset completion when the text changes.
+  useEffect(() => {
+    setSelected(0);
+    setDismissed(false);
+  }, [text]);
+  useEffect(() => {
+    if (menuOpen) document.getElementById(`${listId}-${selected}`)?.scrollIntoView({ block: "nearest" });
+  }, [menuOpen, listId, selected]);
+
   useEffect(() => {
     if (text) localStorage.setItem(draftKey(conversationId), text);
     else localStorage.removeItem(draftKey(conversationId));
@@ -45,9 +70,8 @@ export function Composer({
   const ready = workspace.state === "ready";
   const unavailable = codex?.state === "unavailable";
 
-  const send = async () => {
-    const body = text.trim();
-    if (!body || running || busy) return;
+  const focus = () => requestAnimationFrame(() => ref.current?.focus());
+  const submit = async (body: string) => {
     setBusy(true);
     setError(null);
     try {
@@ -58,6 +82,195 @@ export function Composer({
     } finally {
       setBusy(false);
     }
+  };
+  const choose = (command: SlashCommand) => void execute(command);
+  const execute = async (command: SlashCommand, args = "") => {
+    if (busy) return;
+    setError(null);
+    setConfirmation(null);
+    setBusy(true);
+    try {
+      if ("unavailable" in command) {
+        setNotice(command.unavailable);
+      } else {
+        switch (command.name) {
+          case "model":
+            if (args) {
+              const [model, reasoningEffort, extra] = args.split(/\s+/);
+              if (extra) throw new Error("Use /model <model> [reasoning effort], or /model for the picker.");
+              await sendCommand("conversation.configure", { conversationId, model, reasoningEffort });
+              setConfirmation("Model saved for the next turn.");
+            } else setPanel("model");
+            break;
+          case "reasoning":
+            if (args) {
+              await sendCommand("conversation.configure", { conversationId, reasoningEffort: args });
+              setConfirmation("Reasoning effort saved for the next turn.");
+            } else setPanel("reasoning");
+            break;
+          case "fast":
+            if (args) {
+              if (args !== "on" && args !== "off")
+                throw new Error("Use /fast on, /fast off, or /fast for the speed picker.");
+              const data = (await sendCommand("conversation.inspect", {
+                conversationId,
+                view: "models",
+              })) as InspectResult;
+              if (data.kind !== "models") throw new Error("Codex did not return its model choices.");
+              const model =
+                data.models.find((m) => m.model === conversation.model) ??
+                (conversation.model == null ? data.models.find((m) => m.isDefault) : undefined);
+              const fast = model?.serviceTiers.find((tier) => /^fast$/i.test(tier.name) || tier.id === "fast");
+              if (args === "on" && !fast) throw new Error("This model does not offer a Fast tier in your account.");
+              await sendCommand("conversation.configure", {
+                conversationId,
+                serviceTier: args === "on" ? fast!.id : null,
+              });
+              setConfirmation(`Speed saved: ${args === "on" ? "Fast" : "Standard"}.`);
+            } else setPanel("fast");
+            break;
+          case "permissions":
+            setPanel("permissions");
+            break;
+          case "plan":
+            if (running) throw new Error("Wait for the current turn to finish before switching Plan mode.");
+            if (args) await sendCommand("turn.start", { conversationId, text: args, mode: "plan" });
+            setPlan(args ? true : !plan);
+            break;
+          case "review":
+            if (running) throw new Error("Wait for the current turn to finish or stop it before starting a review.");
+            if (args)
+              await sendCommand("turn.start", {
+                conversationId,
+                text: `Review changes against ${args}`,
+                mode: "review",
+                reviewTarget: { type: "baseBranch", branch: args },
+              });
+            else setPanel("review");
+            break;
+          case "status":
+          case "usage":
+          case "skills":
+          case "apps":
+          case "plugins":
+          case "hooks":
+          case "mcp":
+            setPanel(command.name);
+            break;
+          case "compact":
+          case "fork":
+          case "stop": {
+            const result = (await sendCommand("conversation.action", {
+              conversationId,
+              action: command.name === "stop" ? "stop-background" : command.name,
+            })) as { conversationId: string };
+            if (command.name === "fork")
+              navigate({
+                name: "workspace",
+                workspaceId: workspace.id,
+                conversationId: result.conversationId,
+                pane: "conversation",
+              });
+            else
+              setConfirmation(
+                command.name === "compact" ? "Codex context compaction started." : "Background terminals stopped.",
+              );
+            break;
+          }
+          case "new":
+          case "clear": {
+            const result = (await sendCommand("conversation.create", {
+              workspaceId: workspace.id,
+              provider: conversation.provider,
+              approvalPolicy: conversation.approvalPolicy,
+              model: conversation.model ?? undefined,
+              title: args || undefined,
+            })) as { conversationId: string };
+            navigate({
+              name: "workspace",
+              workspaceId: workspace.id,
+              conversationId: result.conversationId,
+              pane: "conversation",
+            });
+            break;
+          }
+          case "resume":
+            setPanel("resume");
+            break;
+          case "rename":
+            if (args) await sendCommand("conversation.rename", { conversationId, title: args });
+            else setPanel("rename");
+            break;
+          case "delete":
+            if (running) throw new Error("Stop the active or queued run before deleting this conversation.");
+            if (!confirm(`Delete "${conversation.title}" and its conversation history? This cannot be undone.`)) return;
+            await sendCommand("conversation.delete", { conversationId });
+            break;
+          case "diff":
+            navigate({ name: "workspace", workspaceId: workspace.id, conversationId, pane: "changes" });
+            break;
+          case "ps":
+            navigate({ name: "workspace", workspaceId: workspace.id, conversationId, pane: "shell" });
+            break;
+          case "copy": {
+            const latest = Object.values(detail?.items ?? {})
+              .filter((i) => i.kind === "agent_message" && i.status === "completed" && i.data.phase !== "commentary")
+              .sort((a, b) => b.position - a.position)[0];
+            if (!latest?.data.text) throw new Error("There is no completed assistant response to copy yet.");
+            await navigator.clipboard.writeText(latest.data.text);
+            setConfirmation("Latest response copied.");
+            break;
+          }
+          case "init":
+            setText(
+              "Inspect the existing project instructions and create or update AGENTS.md with concise guidance for working in this repository. Preserve relevant existing instructions.",
+            );
+            focus();
+            return;
+          case "mention":
+            if (args) {
+              setText(`Please inspect ${args} `);
+              focus();
+              return;
+            }
+            setPanel("mention");
+            break;
+          case "theme":
+            setPanel("theme");
+            break;
+          case "help":
+            setNotice(
+              "Type / at the start of the message to browse commands, then keep typing to filter. Use ↑/↓ and Enter or Tab, or tap an option. Escape closes the menu. Model, reasoning, speed, and approval changes are saved for subsequent turns. Commands marked ‘Other surface’ explain where they are available. Paths such as /home/ubuntu are sent as ordinary message text.",
+            );
+            break;
+          case "exit":
+          case "quit":
+            navigate({ name: "home" });
+            break;
+          default: {
+            const never: never = command;
+            throw new Error(`Unsupported command: ${never}`);
+          }
+        }
+      }
+      setText("");
+      setDismissed(true);
+      focus();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const send = async () => {
+    const body = text.trim();
+    if (!body || running || busy) return;
+    const command = parseSlash(body);
+    const match = command && SLASH_COMMANDS.find((c) => c.name === command.query);
+    if (match) await execute(match, command.args);
+    else if (command) setError(`Unknown command /${command.query}. Type / to see available commands.`);
+    else await submit(body);
   };
 
   const interrupt = async () => {
@@ -84,13 +297,92 @@ export function Composer({
             {error ?? disabledReason}
           </p>
         )}
-        <div className="flex items-end gap-2 rounded-xl border border-wb-border-strong bg-wb-bg p-1.5 focus-within:border-neutral-500">
+        {confirmation && (
+          <p role="status" className="mb-2 text-[12px] text-neutral-400">
+            {confirmation}
+          </p>
+        )}
+        <div className="relative flex items-end gap-2 rounded-xl border border-wb-border-strong bg-wb-bg p-1.5 focus-within:border-neutral-500">
+          {menuOpen && (
+            <div
+              data-slash-menu
+              className="absolute inset-x-0 bottom-full z-30 mb-2 overflow-hidden rounded-lg border border-wb-border-strong bg-wb-panel shadow-xl"
+            >
+              <div className="border-b border-wb-border px-3 py-2 text-[12px] text-neutral-500">
+                Slash commands
+                <span className="hidden md:inline"> · ↑/↓ to browse · Enter or Tab to choose</span>
+                <span className="md:hidden"> · Tap to choose</span>
+              </div>
+              <div
+                id={listId}
+                role="listbox"
+                aria-label="Slash commands"
+                className="max-h-[min(45dvh,22rem)] overflow-y-auto overscroll-contain p-1"
+              >
+                {matches.map((command, index) => (
+                  <button
+                    key={command.name}
+                    id={`${listId}-${index}`}
+                    type="button"
+                    role="option"
+                    aria-selected={index === selected}
+                    disabled={busy}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => choose(command)}
+                    className={clsx(
+                      "flex min-h-12 w-full items-start gap-3 rounded-md px-3 py-2 text-left disabled:opacity-40",
+                      index === selected ? "bg-neutral-800" : "hover:bg-neutral-900",
+                    )}
+                  >
+                    <span className="w-24 shrink-0 break-words font-mono text-[13px] text-neutral-200">
+                      /{command.name}
+                    </span>
+                    <span className="min-w-0 text-[12px] text-neutral-400">
+                      <span className="line-clamp-2">{command.description}</span>
+                      {"unavailable" in command && (
+                        <span className="block text-[11px] text-neutral-500">Other surface</span>
+                      )}
+                    </span>
+                  </button>
+                ))}
+                {matches.length === 0 && (
+                  <p className="px-3 py-3 text-[13px] text-neutral-500">No matching commands.</p>
+                )}
+              </div>
+            </div>
+          )}
           <textarea
             ref={ref}
             value={text}
             rows={1}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              setText(e.target.value);
+              setConfirmation(null);
+            }}
+            onFocus={() => setFocused(true)}
+            onBlur={(e) => {
+              if (!(e.relatedTarget instanceof Element) || !e.relatedTarget.closest("[data-slash-menu]"))
+                setFocused(false);
+            }}
             onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing) return;
+              if (menuOpen) {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setDismissed(true);
+                  return;
+                }
+                if ((e.key === "ArrowDown" || e.key === "ArrowUp") && matches.length) {
+                  e.preventDefault();
+                  setSelected((s) => (s + (e.key === "ArrowDown" ? 1 : -1) + matches.length) % matches.length);
+                  return;
+                }
+                if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey && matches[selected]) {
+                  e.preventDefault();
+                  choose(matches[selected]);
+                  return;
+                }
+              }
               // Enter sends on desktop; on touch keyboards Enter inserts a newline.
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !coarsePointer()) {
                 e.preventDefault();
@@ -98,9 +390,18 @@ export function Composer({
               }
             }}
             placeholder={
-              running ? "Codex is working…" : plan ? "Describe what to plan…" : "Ask Codex to make a change…"
+              running
+                ? "Codex is working…"
+                : plan
+                  ? "Describe what to plan…"
+                  : "Ask Codex to make a change…"
             }
             aria-label="Message"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={menuOpen}
+            aria-controls={menuOpen ? listId : undefined}
+            aria-activedescendant={menuOpen && matches[selected] ? `${listId}-${selected}` : undefined}
             disabled={!ready}
             className="max-h-60 min-h-10 flex-1 resize-none bg-transparent px-2 py-2 text-[16px] leading-snug text-neutral-100 placeholder:text-neutral-600 focus:outline-none md:text-[14px]"
           />
@@ -128,14 +429,44 @@ export function Composer({
             </button>
           )}
         </div>
-        <div className="mt-1.5 flex items-center gap-3 px-1 text-[12px] text-neutral-500">
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[12px] text-neutral-500">
           <label className="inline-flex min-h-7 items-center gap-1.5">
             <input type="checkbox" checked={plan} onChange={(e) => setPlan(e.target.checked)} />
             <span className={clsx(plan && "text-sky-300")}>Plan mode</span>
           </label>
-          <span className="hidden md:inline">Enter to send · Shift+Enter for a newline</span>
+          {conversation.model && (
+            <span className="max-w-40 truncate" title={conversation.model}>
+              {conversation.model}
+              {conversation.serviceTier ? ` · ${conversation.serviceTier}` : ""}
+            </span>
+          )}
+          <span className="hidden md:inline">Enter to send · Shift+Enter for a newline · / for commands</span>
+          <span className="md:hidden">/ for commands</span>
         </div>
       </div>
+      {panel && (
+        <SlashCommandDialog
+          panel={panel}
+          conversation={conversation}
+          workspace={workspace}
+          onClose={() => {
+            setPanel(null);
+            focus();
+          }}
+          onDraft={(draft) => setText(draft)}
+        />
+      )}
+      {notice && (
+        <Dialog
+          title="Slash commands"
+          onClose={() => {
+            setNotice(null);
+            focus();
+          }}
+        >
+          <p className="text-[13px] leading-relaxed text-neutral-300">{notice}</p>
+        </Dialog>
+      )}
     </div>
   );
 }
