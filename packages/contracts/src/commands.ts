@@ -77,6 +77,7 @@ export const commandSchemas = {
       "A review target is required only for review mode.",
     ),
   "turn.interrupt": z.object({ conversationId: id, runId: id }),
+  "task.stop": z.object({ conversationId: id, runId: id, taskId: id }),
   "input.respond": z.object({
     inputId: id,
     response: z.discriminatedUnion("kind", [

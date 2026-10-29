@@ -33,6 +33,18 @@ skill/app pickers. Commands requiring the terminal, IDE, or a feature Workbench
 does not yet integrate explain their availability rather than being sent as prompts.
 Paths such as `/home/ubuntu/project` remain ordinary message text.
 
+Claude conversations use the Agent SDK with the installed Claude CLI and your
+local claude.ai subscription login. They support streamed messages and tools, approvals, user questions,
+Plan mode, cancellation, and resuming saved sessions. Claude loads user, project,
+and local settings, including project instructions, skills, and MCP configuration.
+Its command menu offers supported Workbench controls; `/model` accepts a model ID
+or alias. Follow-up messages wait for the next Claude turn.
+
+Claude's subagents, background shells, and monitors appear as cards in the
+transcript and, while running, in a task list above the message box, where each
+can be stopped individually. A turn stays open until its background tasks end,
+and their completion notifications continue it, as in the terminal.
+
 Independent conversations can run concurrently in the same worktree, including
 Claude alongside Codex. Only messages within one conversation queue. Agents receive
 coordination instructions and a live command to inspect other sessions' tasks and
@@ -69,7 +81,7 @@ It started from [the phased implementation plan](IMPLEMENTATION_PLAN.md) and reu
 
 ## Status
 
-Phases 0–3 and 5–9 are implemented and verified; see the [acceptance record](docs/operations/acceptance.md). Phase 4 (Claude) is pending until an API key is provided ([decision 0003](docs/decisions/0003-claude-agent-sdk.md)).
+Phases 0–3 and 5–9 are implemented and verified; see the [acceptance record](docs/operations/acceptance.md). Claude conversations use the local subscription login ([decision 0003](docs/decisions/0003-claude-agent-sdk.md)).
 
 The services run under systemd on this machine and listen on `127.0.0.1:4310`. Before first use:
 

@@ -1,10 +1,17 @@
-import type { Conversation, InspectResult, Run, Workspace } from "@workbench/contracts";
+import {
+  type Conversation,
+  type InspectResult,
+  type NativeCommand,
+  PROVIDER_LABELS,
+  type Run,
+  type Workspace,
+} from "@workbench/contracts";
 import clsx from "clsx";
 import { ArrowUp, ListPlus, Square, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { sendCommand } from "../lib/api.ts";
 import { navigate } from "../lib/router.ts";
-import { parseSlash, SLASH_COMMANDS, type SlashCommand } from "../lib/slash-commands.ts";
+import { type MenuCommand, parseSlash, slashCommands } from "../lib/slash-commands.ts";
 import { useStore } from "../lib/store.ts";
 import { SlashCommandDialog, type SlashPanel } from "./SlashCommandDialog.tsx";
 import { Dialog } from "./ui.tsx";
@@ -27,7 +34,11 @@ export function Composer({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
-  const codex = useStore((s) => s.worker?.codex);
+  const worker = useStore((s) => s.worker);
+  const providerStatus = worker?.[conversation.provider];
+  const agent = PROVIDER_LABELS[conversation.provider];
+  const [native, setNative] = useState<NativeCommand[]>([]);
+  const commands = slashCommands(conversation.provider, native);
   const detail = useStore((s) => s.conversation);
   const runs = useStore((s) => s.runs);
   const otherSessions = Object.values(runs).filter(
@@ -44,7 +55,7 @@ export function Composer({
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<string | null>(null);
   const slash = parseSlash(text);
-  const matches = slash ? SLASH_COMMANDS.filter((c) => c.name.startsWith(slash.query)) : [];
+  const matches = slash ? commands.filter((c) => c.name.startsWith(slash.query)) : [];
   // The menu closes once the command name is followed by a space, so arguments can be typed.
   const menuOpen = focused && slash !== null && !/\s/.test(text.trimStart()) && !dismissed;
   const listId = `slash-${conversationId}`;
@@ -52,6 +63,25 @@ export function Composer({
   useEffect(() => {
     localStorage.setItem(`wb:plan:${conversationId}`, plan ? "1" : "0");
   }, [conversationId, plan]);
+  // Claude's own commands depend on the worktree's skills and settings.
+  const listNative = conversation.provider === "claude" && providerStatus?.state === "ready";
+  useEffect(() => {
+    setNative([]);
+    if (!listNative) return;
+    let stopped = false;
+    sendCommand("conversation.inspect", { conversationId, view: "commands" }).then(
+      (result) => {
+        const data = result as InspectResult;
+        if (!stopped && data.kind === "commands") setNative(data.commands);
+      },
+      (e) => {
+        if (!stopped) setError(`Claude's commands could not be listed: ${(e as Error).message}`);
+      },
+    );
+    return () => {
+      stopped = true;
+    };
+  }, [conversationId, listNative]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset completion when the text changes.
   useEffect(() => {
     setSelected(0);
@@ -96,7 +126,7 @@ export function Composer({
     }
   };
   const ready = workspace.state === "ready";
-  const unavailable = codex?.state === "unavailable";
+  const unavailable = providerStatus?.state === "unavailable";
 
   const focus = () => requestAnimationFrame(() => ref.current?.focus());
   const submit = async (body: string) => {
@@ -111,9 +141,16 @@ export function Composer({
       setBusy(false);
     }
   };
-  const choose = (command: SlashCommand) => void execute(command);
-  const execute = async (command: SlashCommand, args = "") => {
+  // Choosing a native command that takes arguments fills it in for them to be typed.
+  const choose = (command: MenuCommand) => {
+    if ("native" in command && command.argumentHint) {
+      setText(`/${command.name} `);
+      focus();
+    } else void execute(command);
+  };
+  const execute = async (command: MenuCommand, args = "") => {
     if (busy) return;
+    if ("native" in command) return submit(`/${command.name}${args ? ` ${args}` : ""}`);
     setError(null);
     setConfirmation(null);
     setBusy(true);
@@ -131,6 +168,7 @@ export function Composer({
             } else setPanel("model");
             break;
           case "reasoning":
+          case "effort":
             if (args) {
               await sendCommand("conversation.configure", { conversationId, reasoningEffort: args });
               setConfirmation("Reasoning effort saved for the next turn.");
@@ -144,7 +182,7 @@ export function Composer({
                 conversationId,
                 view: "models",
               })) as InspectResult;
-              if (data.kind !== "models") throw new Error("Codex did not return its model choices.");
+              if (data.kind !== "models") throw new Error(`${agent} did not return its model choices.`);
               const model =
                 data.models.find((m) => m.model === conversation.model) ??
                 (conversation.model == null ? data.models.find((m) => m.isDefault) : undefined);
@@ -268,7 +306,9 @@ export function Composer({
             break;
           case "help":
             setNotice(
-              "Type / at the start of the message to browse commands, then keep typing to filter. Use ↑/↓ and Enter or Tab, or tap an option. Escape closes the menu. Model, reasoning, speed, and approval changes are saved for subsequent turns. Commands marked ‘Other surface’ explain where they are available. Paths such as /home/ubuntu are sent as ordinary message text.",
+              conversation.provider === "claude"
+                ? "Type / at the start of the message to browse commands, then keep typing to filter. Use ↑/↓ and Enter or Tab, or tap an option. Escape closes the menu. Model, effort, speed, and approval changes are saved for subsequent turns. Commands marked ‘Claude’ and any other /text are sent to Claude, which runs its own commands and skills."
+                : "Type / at the start of the message to browse commands, then keep typing to filter. Use ↑/↓ and Enter or Tab, or tap an option. Escape closes the menu. Model, reasoning, speed, and approval changes are saved for subsequent turns. Commands marked ‘Other surface’ explain where they are available. Paths such as /home/ubuntu are sent as ordinary message text.",
             );
             break;
           case "exit":
@@ -295,9 +335,11 @@ export function Composer({
     const body = text.trim();
     if (!body || busy) return;
     const command = parseSlash(body);
-    const match = command && SLASH_COMMANDS.find((c) => c.name === command.query);
+    const match = command && commands.find((c) => c.name === command.query);
     if (match) await execute(match, command.args);
-    else if (command) setError(`Unknown command /${command.query}. Type / to see available commands.`);
+    // Claude resolves unlisted /text itself, for example a skill added during this session.
+    else if (command && conversation.provider === "codex")
+      setError(`Unknown command /${command.query}. Type / to see available commands.`);
     else await submit(body);
   };
 
@@ -314,7 +356,7 @@ export function Composer({
   const disabledReason = !ready
     ? `Workspace is ${workspace.state.replace("_", " ")}.`
     : unavailable
-      ? `Codex is unavailable: ${codex?.error ?? ""}`
+      ? `${agent} is unavailable: ${conversation.provider === "claude" ? (worker?.claude.reason ?? "") : (worker?.codex.error ?? "")}`
       : null;
 
   return (
@@ -343,7 +385,8 @@ export function Composer({
         {queued.length > 0 && (
           <section aria-label="Queued messages" className="mb-2 rounded-lg border border-wb-border px-3 py-2">
             <p className="text-[12px] text-neutral-400">
-              {queued.length} queued · Next tool boundary, or next turn for mode changes
+              {queued.length} queued ·{" "}
+              {conversation.provider === "claude" ? "Next turn" : "Next tool boundary, or next turn for mode changes"}
             </p>
             <ol className="max-h-32 overflow-y-auto">
               {queued.map((run, index) => (
@@ -408,6 +451,11 @@ export function Composer({
                       {"unavailable" in command && (
                         <span className="block text-[11px] text-neutral-500">Other surface</span>
                       )}
+                      {"native" in command && (
+                        <span className="block text-[11px] text-neutral-500">
+                          Claude{command.argumentHint && ` · ${command.argumentHint}`}
+                        </span>
+                      )}
                     </span>
                   </button>
                 ))}
@@ -457,10 +505,12 @@ export function Composer({
             }}
             placeholder={
               running
-                ? "Steer Codex at the next tool boundary…"
+                ? conversation.provider === "claude"
+                  ? "Queue a message for Claude's next turn…"
+                  : "Steer Codex at the next tool boundary…"
                 : plan
                   ? "Describe what to plan…"
-                  : "Ask Codex to make a change…"
+                  : `Ask ${agent} to make a change…`
             }
             aria-label="Message"
             role="combobox"

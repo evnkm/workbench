@@ -627,7 +627,12 @@ function NewConversationDialog({
       "Codex",
       worker?.codex.state === "unavailable" ? worker.codex.error : `Codex ${worker?.codex.version ?? ""}`,
     ),
-    option("claude", "Claude", worker?.claude.reason ?? "Not configured.", true),
+    option(
+      "claude",
+      "Claude",
+      worker?.claude.reason ?? "Claude subscription · local login",
+      worker?.claude.state !== "ready",
+    ),
   ];
   return (
     <Dialog title="New conversation" onClose={onClose}>
@@ -647,7 +652,7 @@ function NewConversationDialog({
                 className="mt-1"
                 disabled={p.disabled}
                 checked={provider === p.value}
-                onChange={() => setProvider(p.value as "codex")}
+                onChange={() => setProvider(p.value as typeof provider)}
               />
               <span>
                 <span className="block text-[14px] text-neutral-100">{p.title}</span>
@@ -658,12 +663,12 @@ function NewConversationDialog({
         </fieldset>
         <Field
           label="Approvals"
-          hint="Commands run with full access in the worktree. Choose whether Codex must ask first (see decision 0002)."
+          hint="Tools run with full access in the worktree. Choose when the agent must ask first."
         >
           <select className={inputClass} value={policy} onChange={(e) => setPolicy(e.target.value as typeof policy)}>
             <option value="never">Never ask</option>
-            <option value="on-request">Ask when Codex decides it is needed</option>
-            <option value="untrusted">Ask before any command not known to be safe</option>
+            <option value="on-request">Ask when the agent needs approval</option>
+            <option value="untrusted">Ask before untrusted commands and edits</option>
           </select>
         </Field>
         <ErrorText>{error}</ErrorText>

@@ -17,7 +17,7 @@ After the production scenarios ran, production state was reset and the temporary
 | Provider failure | A visible failed or interrupted run with history kept. | Pass | Production: SIGKILL of `codex app-server` mid-turn left the turn `interrupted` with the worker unaffected. Codex restarted and the next turn succeeded in the same conversation. Tests: a turn failed by Codex is recorded as failed. |
 | Submit the same command twice | One accepted command and execution. | Pass | Tests: concurrent HTTP submissions with one request id store one command. Dev: a repeated `workspace.create` returned the same command and created one worktree. |
 | Answer an approval from two devices | One response wins; the other reports a stale request. | Pass | Dev, real Codex: two concurrent responses produced one success and one "already answered". Tests: the same with the fake provider, plus a database-level race across two connections. |
-| Launch two mutating agents in one workspace | Worker enforces the queue policy. | Pass | Dev, real Codex: the second conversation's turn queued and started when the first was interrupted. A second turn in the same conversation is refused. |
+| Launch multiple agents in one workspace | Independent conversations run concurrently; each conversation keeps its own message queue. | Local tests pass | Codex and Claude lifecycle fixtures demonstrate nonblocking sessions. Agents receive live session discovery and coordination guidance; live shared-worktree acceptance remains to be repeated. |
 | Archive dirty workspace | Edits and untracked files survive. | Pass | Tests: modified and untracked files are intact after archive and restore. Archive is refused while turns, jobs, shells, or apps are running. |
 | Start two application workspaces | Port allocation and preview routing stay independent. | Pass | Tests: distinct port blocks; an occupied reserved port is reported by name. Dev: preview proxy auth, `Host` rewrite, cookie isolation, WebSocket upgrade, and 502 after stop. |
 | Stream very large output on phone | Output is bounded; navigation and composer stay usable. | Pass (bounded) | Command output is kept to the last 64 KiB per item, diffs are capped at 256 KiB with a notice, and job logs are capped per run (test: 3 MB of output truncated at 1 MB). Not measured on a physical phone. |
@@ -32,11 +32,11 @@ After the production scenarios ran, production state was reset and the temporary
 
 | Phase | Status | Notes |
 | --- | --- | --- |
-| 0 Integrations | Done | Codex demonstrated (decision 0002). Claude deferred by the user (decision 0003). Access is Tailscale; state is in `~/.local/share/workbench`. |
+| 0 Integrations | Done | Codex demonstrated (decision 0002). Claude implemented with the local subscription login and a live Max-subscription smoke test (decision 0003). Access is Tailscale; state is in `~/.local/share/workbench`. |
 | 1 Foundation | Done, except device access | Services, migrations, IPC, idempotent commands, auth, and backup/restore are verified. Loading on a phone through Tailscale needs the node logged in (see setup). |
 | 2 Workspaces | Done | Independent worktrees, duplicate-safe creation, setup retry, archive/restore, and narrow-viewport navigation. |
 | 3 Codex workflow | Done | All six exit criteria were demonstrated with real Codex (E2E and dev) and with tests. |
-| 4 Claude | **Pending** | Waiting for an API key (decision 0003). The UI shows Claude as unavailable with the reason. |
+| 4 Claude | Implemented | Local lifecycle and SDK transport tests cover approvals/questions, resume, cancellation, and concurrent sessions. A live Haiku turn confirms Max-subscription authentication and completion; project configuration and full browser-to-live-provider acceptance remain to be exercised (decision 0003). |
 | 5 Changes and shells | Done, except editor handoff on a client | Status and diffs (side-by-side on wide screens, stacked on phones), persistent shells, and phone key strip. Editor links need `WORKBENCH_SSH_HOST` and have not been tried from your desktop. |
 | 6 Apps and previews | Done | Previews bind to the Tailscale IP once it exists; until then, to 127.0.0.1. |
 | 7 Jobs | Done | Covered by 12 tests plus production kill tests. |

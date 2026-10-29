@@ -89,11 +89,30 @@ export type ItemKind =
   | "web_search"
   | "image"
   | "notice"
+  | "task"
   | "other";
 
 export type ItemStatus = "in_progress" | "completed" | "failed" | "declined" | null;
 
 export type FileChange = { path: string; kind: "add" | "delete" | "update"; movePath: string | null; diff: string };
+
+/** A Claude subagent, background shell, or monitor, keyed by the provider's task id. */
+export type AgentTask = {
+  id: string;
+  /** Provider task type, for example local_bash, local_agent, monitor, or local_workflow. */
+  type: string | null;
+  description: string;
+  state: "running" | "completed" | "failed" | "stopped";
+  /** False while the spawning tool call blocks on it. */
+  backgrounded: boolean;
+  /** Latest one-line progress from the task. */
+  summary: string | null;
+  lastTool: string | null;
+  usage: { totalTokens: number; toolUses: number; durationMs: number } | null;
+  /** Output file on the server, once the task has ended. */
+  outputFile: string | null;
+  error: string | null;
+};
 
 export type ConversationImage = {
   source: string;
@@ -125,6 +144,7 @@ export type ItemData = {
   result?: unknown;
   error?: string | null;
   query?: string;
+  task?: AgentTask;
   /** Provider item type when kind is "other". */
   providerType?: string;
 };
@@ -150,6 +170,7 @@ export type InputQuestion = {
   header: string;
   question: string;
   options: { label: string; description: string }[] | null;
+  multiSelect?: boolean;
   allowOther: boolean;
   secret: boolean;
 };
@@ -214,7 +235,7 @@ export type WorkerStatus = {
   startedAt: string;
   heartbeatAt: string;
   codex: { state: "starting" | "ready" | "unavailable"; version: string | null; error: string | null };
-  claude: { state: "unavailable"; reason: string };
+  claude: { state: "starting" | "ready" | "unavailable"; reason: string | null };
   health: WorkerHealth;
 };
 

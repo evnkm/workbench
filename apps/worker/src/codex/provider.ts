@@ -238,6 +238,7 @@ export class CodexProvider {
     const stale = listActiveRuns(db).filter(
       (r) =>
         r.kind === "agent_turn" &&
+        getConversation(db, r.conversationId!)?.provider === "codex" &&
         ACTIVE_AGENT_STATES.has(r.state) &&
         !(r.providerTurnId && this.turnRuns.get(r.providerTurnId) === r.id && this.server?.alive) &&
         ![...this.pendingStarts.values()].includes(r.id),
@@ -287,7 +288,10 @@ export class CodexProvider {
     this.ctx.published();
     const conversations = new Set(
       listActiveRuns(db)
-        .filter((r) => r.state === "queued" && r.conversationId)
+        .filter(
+          (r) =>
+            r.state === "queued" && r.conversationId && getConversation(db, r.conversationId)?.provider === "codex",
+        )
         .map((r) => r.conversationId!),
     );
     for (const id of conversations) this.drainQueue(id);
@@ -315,7 +319,7 @@ export class CodexProvider {
     model?: string;
   }) {
     if (p.provider === "claude") {
-      throw new CommandError("Claude is not configured. Add ANTHROPIC_API_KEY to enable it (see docs/decisions/0003).");
+      throw new CommandError("Claude conversations must be routed to the Claude provider.");
     }
     const w = getWorkspace(this.ctx.db, p.workspaceId);
     if (!w) throw new CommandError("Workspace not found.");

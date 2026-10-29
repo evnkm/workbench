@@ -3,6 +3,8 @@
 import { mkdirSync } from "node:fs";
 import { nowIso, uuidv7, type WorkerStatus } from "@workbench/contracts";
 import { createLogger, Database, loadConfig, pruneEvents, saveWorkerStatus } from "@workbench/db";
+import { agentHandlers } from "./agents.ts";
+import { ClaudeProvider } from "./claude/provider.ts";
 import { CodexProvider } from "./codex/provider.ts";
 import { CommandLoop } from "./commands.ts";
 import { WorkerContext } from "./context.ts";
@@ -30,10 +32,11 @@ ctx.attachIpc(ipc);
 
 const workspaces = new Workspaces(ctx);
 const codex = new CodexProvider(ctx);
+const claude = new ClaudeProvider(ctx);
 const processes = new Processes(ctx);
 workspaces.addArchiveGuard(processes.archiveBlocker);
 loop.register(workspaces.handlers());
-loop.register(codex.handlers());
+loop.register(agentHandlers(ctx, codex, claude));
 loop.register(processes.handlers());
 const jobs = new Jobs(ctx, workspaces, codex);
 loop.register(jobs.handlers());
@@ -48,7 +51,7 @@ function status(): WorkerStatus {
     startedAt,
     heartbeatAt: nowIso(),
     codex: codex.status,
-    claude: { state: "unavailable", reason: "Claude integration is deferred until an API key is configured." },
+    claude: claude.status,
     health: health.sample(codex.restarts),
   };
 }
@@ -57,11 +60,13 @@ const publishStatus = () => {
   ctx.published();
 };
 codex.onStatusChange = publishStatus;
+claude.onStatusChange = publishStatus;
 
 await ipc.listen();
 workspaces.reconcile();
 publishStatus();
 loop.start();
+void claude.start();
 void codex.start();
 void processes.start();
 jobs.start();
@@ -98,6 +103,7 @@ async function shutdown(signal: string) {
   workspaces.stop();
   processes.shutdown();
   await codex.stop();
+  await claude.stop();
   await ipc.close();
   db.close();
   process.exit(0);

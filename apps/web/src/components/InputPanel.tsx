@@ -73,19 +73,24 @@ function ApprovalCard({ input }: { input: PendingInput }) {
 function QuestionCard({ input }: { input: PendingInput }) {
   const { busy, error, respond } = useRespond(input);
   const questions = input.request.questions ?? [];
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [other, setOther] = useState<Record<string, string>>({});
-  const complete = questions.every((q) => (answers[q.id] === "__other" ? other[q.id]?.trim() : answers[q.id]));
+  const select = (id: string, value: string, multiSelect: boolean) =>
+    setAnswers((previous) => ({
+      ...previous,
+      [id]: multiSelect
+        ? previous[id]?.includes(value)
+          ? previous[id]!.filter((v) => v !== value)
+          : [...(previous[id] ?? []), value]
+        : [value],
+    }));
+  const values = (id: string) =>
+    (answers[id] ?? []).map((value) => (value === "__other" ? (other[id] ?? "").trim() : value)).filter(Boolean);
+  const complete = questions.every(
+    (q) => values(q.id).length > 0 && (!answers[q.id]?.includes("__other") || other[q.id]?.trim()),
+  );
   const submit = () =>
-    respond({
-      kind: "answers",
-      answers: Object.fromEntries(
-        questions.map((q) => [
-          q.id,
-          [answers[q.id] === "__other" ? (other[q.id] ?? "").trim() : (answers[q.id] ?? "")],
-        ]),
-      ),
-    });
+    respond({ kind: "answers", answers: Object.fromEntries(questions.map((q) => [q.id, values(q.id)])) });
   return (
     <section aria-label={input.request.title} className="rounded-lg border border-sky-800/60 bg-wb-panel p-3">
       <div className="mb-2 flex items-center gap-2 text-[13px] font-semibold text-sky-200">
@@ -104,11 +109,11 @@ function QuestionCard({ input }: { input: PendingInput }) {
                 className="flex min-h-10 cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 hover:bg-neutral-900"
               >
                 <input
-                  type="radio"
+                  type={q.multiSelect ? "checkbox" : "radio"}
                   className="mt-1"
                   name={`${input.id}-${q.id}`}
-                  checked={answers[q.id] === o.label}
-                  onChange={() => setAnswers((a) => ({ ...a, [q.id]: o.label }))}
+                  checked={answers[q.id]?.includes(o.label) ?? false}
+                  onChange={() => select(q.id, o.label, q.multiSelect ?? false)}
                 />
                 <span>
                   <span className="block text-[14px] text-neutral-200">{o.label}</span>
@@ -121,22 +126,22 @@ function QuestionCard({ input }: { input: PendingInput }) {
                 {q.options?.length ? (
                   <label className="flex items-center gap-2 text-[13px] text-neutral-300">
                     <input
-                      type="radio"
+                      type={q.multiSelect ? "checkbox" : "radio"}
                       name={`${input.id}-${q.id}`}
-                      checked={answers[q.id] === "__other"}
-                      onChange={() => setAnswers((a) => ({ ...a, [q.id]: "__other" }))}
+                      checked={answers[q.id]?.includes("__other") ?? false}
+                      onChange={() => select(q.id, "__other", q.multiSelect ?? false)}
                     />
                     Other
                   </label>
                 ) : null}
-                {(answers[q.id] === "__other" || !q.options?.length) && (
+                {(answers[q.id]?.includes("__other") || !q.options?.length) && (
                   <input
                     type={q.secret ? "password" : "text"}
                     className={inputClass}
                     value={other[q.id] ?? ""}
                     onChange={(e) => {
                       setOther((o) => ({ ...o, [q.id]: e.target.value }));
-                      setAnswers((a) => ({ ...a, [q.id]: "__other" }));
+                      if (!answers[q.id]?.includes("__other")) select(q.id, "__other", q.multiSelect ?? false);
                     }}
                     aria-label={`Answer to ${q.question}`}
                   />

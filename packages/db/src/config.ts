@@ -21,6 +21,7 @@ export type Config = {
   webDist: string;
   tmuxSocket: string;
   codexBin: string;
+  claudeBin: string;
   /** Inclusive range from which workspaces reserve blocks of application ports. */
   portRange: [number, number];
   portsPerWorkspace: number;
@@ -51,6 +52,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     webDist: env.WORKBENCH_WEB_DIST ?? join(import.meta.dirname, "../../../apps/web/dist"),
     tmuxSocket: env.WORKBENCH_TMUX_SOCKET ?? "workbench",
     codexBin: env.WORKBENCH_CODEX_BIN ?? "codex",
+    claudeBin: env.WORKBENCH_CLAUDE_BIN ?? "claude",
     // Below the Linux ephemeral range (32768+), so outgoing connections never
     // take an app's port. 200 ports per block fits Conductor-style projects
     // (Canopy uses CONDUCTOR_PORT + 0..3 and + 100..189).

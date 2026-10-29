@@ -1,9 +1,12 @@
+import type { NativeCommand, Provider } from "@workbench/contracts";
+
 // Conversation actions and the CLI command names users already know. Commands
 // owned by another surface remain discoverable with an explicit availability note.
 export const SLASH_COMMANDS = [
   { name: "model", description: "Choose a model and reasoning effort" },
   { name: "fast", description: "Choose Standard or a model's Fast service tier" },
   { name: "reasoning", description: "Change reasoning effort for the next turn" },
+  { name: "effort", description: "Change reasoning effort for the next turn" },
   { name: "permissions", description: "Change when the agent must ask for approval" },
   { name: "plan", description: "Toggle Plan mode, or plan an inline prompt" },
   { name: "review", description: "Review uncommitted changes or compare with a branch" },
@@ -146,7 +149,47 @@ export const SLASH_COMMANDS = [
 ] as const;
 
 export type SlashCommand = (typeof SLASH_COMMANDS)[number];
+/** An agent-owned command listed by the provider and sent as message text. */
+export type NativeSlashCommand = NativeCommand & { native: true };
+export type MenuCommand = SlashCommand | NativeSlashCommand;
 export function parseSlash(text: string) {
   const match = /^\/([a-z-]*)(?:\s+([\s\S]*))?$/i.exec(text.trimStart());
   return match ? { query: match[1]!.toLowerCase(), args: match[2] ?? "" } : null;
+}
+
+// Claude conversations list Workbench's conversation controls followed by the
+// CLI's own commands (skills, /compact, /init, ...), which run as prompts.
+// Workbench's version of a command wins: settings such as /model must persist
+// across the separate CLI process each turn runs in.
+// Codex lists the full CLI-compatible set; /effort is the Claude CLI's name.
+const CLAUDE_COMMANDS = new Set([
+  "model",
+  "effort",
+  "fast",
+  "permissions",
+  "plan",
+  "fork",
+  "new",
+  "clear",
+  "resume",
+  "rename",
+  "delete",
+  "diff",
+  "copy",
+  "mention",
+  "ps",
+  "theme",
+  "help",
+  "quit",
+  "exit",
+]);
+export function slashCommands(provider: Provider, native: NativeCommand[]): MenuCommand[] {
+  if (provider === "codex") return SLASH_COMMANDS.filter((command) => command.name !== "effort");
+  const own: MenuCommand[] = SLASH_COMMANDS.filter((command) => CLAUDE_COMMANDS.has(command.name));
+  return [
+    ...own,
+    ...native
+      .filter((command) => !CLAUDE_COMMANDS.has(command.name))
+      .map((command) => ({ ...command, native: true as const })),
+  ];
 }

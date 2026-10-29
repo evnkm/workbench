@@ -34,6 +34,31 @@ curl -s http://127.0.0.1:4310/api/health
 
 The server listens only on `127.0.0.1:4310`.
 
+## Claude
+
+Install Claude Code on the worker host and run `claude auth login` with your
+personal Claude account. Workbench uses that local subscription login through
+the Agent SDK. Check it with `claude auth status --json`; it must report a
+claude.ai login. `WORKBENCH_CLAUDE_BIN` selects the installed executable and
+defaults to `claude`.
+
+Deploy with `scripts/deploy.sh --worker` after active turns finish. Claude appears
+in the new-conversation picker when the worker verifies the local login. Usage
+shares your Claude subscription limits. Workbench strips API-key, bearer-token,
+setup-token, profile, and cloud-provider overrides from Claude subprocesses and
+pins claude.ai login, so those settings cannot silently select API billing.
+Credentials stay in Claude's local credential store; Workbench never copies them
+into its database or browser state. Renew an expired login with `claude auth login`
+and restart the worker.
+
+Project `CLAUDE.md`, skills, MCP servers, hooks, and user/project/local settings
+are loaded explicitly. Model IDs or aliases can be saved through `/model`; model
+access depends on the subscription. Claude and Codex conversations can run
+concurrently in one worktree. Agents can inspect live sessions and recent tools
+using the command supplied in their instructions. Coordinate disjoint file
+ownership; use separate worktrees when edits overlap. Follow-ups within a Claude
+conversation wait for its next turn.
+
 ## Access from desktop and phone (Tailscale)
 
 1. Run `sudo tailscale up` and open the login URL it prints.
@@ -50,7 +75,7 @@ For desktop editor links, set `WORKBENCH_SSH_HOST` to the SSH host alias your de
 | Unit | Owns | Effect of restarting it |
 | --- | --- | --- |
 | `workbench-tmux` | Persistent shells and application processes | **Kills every shell and app.** Only restart deliberately. |
-| `workbench-worker` | Codex app-server, Git mutations, setup commands, jobs, scheduler | Active agent turns and jobs are interrupted, then reconciled on start and marked `interrupted`. They are never assumed successful. |
+| `workbench-worker` | Codex app-server, Claude SDK subprocesses, Git mutations, setup commands, jobs, scheduler | Active agent turns and jobs are interrupted, then reconciled on start and marked `interrupted`. They are never assumed successful. |
 | `workbench-server` | HTTP API, login, event streams, terminal attachments | Browsers reconnect and replay events from their cursor. Execution is unaffected. |
 
 Logs are structured JSON in journald: `journalctl -u workbench-worker -f`.

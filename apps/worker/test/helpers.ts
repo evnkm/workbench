@@ -27,6 +27,7 @@ export function makeContext(env: Record<string, string> = {}) {
   const config = loadConfig({
     WORKBENCH_STATE_DIR: state,
     WORKBENCH_CODEX_BIN: join(import.meta.dirname, "fake-codex.mjs"),
+    WORKBENCH_CLAUDE_BIN: join(import.meta.dirname, "fake-claude.mjs"),
     WORKBENCH_TMUX_SOCKET: `wb-test-${process.pid}`,
     ...env,
   } as NodeJS.ProcessEnv);

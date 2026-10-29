@@ -1,5 +1,5 @@
 import type { ConversationItem, PendingInput, Run, Workspace } from "@workbench/contracts";
-import { isTerminalRunState } from "@workbench/contracts";
+import { isTerminalRunState, PROVIDER_LABELS } from "@workbench/contracts";
 import clsx from "clsx";
 import {
   AlertTriangle,
@@ -21,6 +21,7 @@ import { ConversationImages } from "./ConversationImages.tsx";
 import { DiffText } from "./DiffText.tsx";
 import { InputPanel } from "./InputPanel.tsx";
 import { Markdown } from "./Markdown.tsx";
+import { TaskPanel, taskKind, taskUsage } from "./TaskPanel.tsx";
 import { Button, StatusIndicator } from "./ui.tsx";
 
 export function ConversationView({ workspace }: { workspace: Workspace }) {
@@ -41,6 +42,7 @@ export function ConversationView({ workspace }: { workspace: Workspace }) {
     [conv],
   );
   const activeRun = runs.find((r) => r.state !== "queued" && !isTerminalRunState(r.state));
+  const runningTasks = useMemo(() => items.filter((i) => i.data.task?.state === "running"), [items]);
   const runEnds = useMemo(() => endMarkers(items, runs), [items, runs]);
 
   // Follow new output only when the reader is already at the bottom.
@@ -117,9 +119,14 @@ export function ConversationView({ workspace }: { workspace: Workspace }) {
             {conv.error && <p className="text-center text-[13px] text-red-400">{conv.error}</p>}
             {!conv.loading && items.length === 0 && (
               <div className="py-16 text-center text-[13px] text-neutral-500">
-                <p className="text-neutral-300">Codex in {workspace.name}</p>
+                <p className="text-neutral-300">
+                  {PROVIDER_LABELS[conversation.provider]} in {workspace.name}
+                </p>
                 <p className="mt-1 font-mono text-[12px]">{workspace.worktreePath}</p>
-                <p className="mt-3">Describe the change you want. Codex works in this workspace's worktree.</p>
+                <p className="mt-3">
+                  Describe the change you want. {PROVIDER_LABELS[conversation.provider]} works in this workspace's
+                  worktree.
+                </p>
               </div>
             )}
             {items.map((item) => (
@@ -143,6 +150,7 @@ export function ConversationView({ workspace }: { workspace: Workspace }) {
           </button>
         )}
       </div>
+      {runningTasks.length > 0 && <TaskPanel items={runningTasks} />}
       {openInputs.length > 0 && <InputPanel inputs={openInputs} />}
       <Composer key={conv.id} conversation={conversation} workspace={workspace} activeRun={activeRun ?? null} />
     </div>
@@ -269,6 +277,8 @@ const ItemView = memo(function ItemView({ item }: { item: ConversationItem }) {
       );
     case "image":
       return <ConversationImages item={item} />;
+    case "task":
+      return <TaskCard item={item} />;
     case "notice":
       return (
         <p className={clsx("text-[13px] italic", item.status === "failed" ? "text-red-300" : "text-neutral-500")}>
@@ -350,6 +360,53 @@ function CommandCard({ item }: { item: ConversationItem }) {
       <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-all font-mono text-[12px] leading-[1.5] text-neutral-300">
         {d.output || (item.status === "in_progress" ? "…" : "(no output)")}
       </pre>
+    </Card>
+  );
+}
+
+function TaskCard({ item }: { item: ConversationItem }) {
+  const task = item.data.task!;
+  const { label, Icon } = taskKind(task);
+  const meta = [task.state === "stopped" ? "stopped" : null, taskUsage(task)].filter(Boolean).join(" · ");
+  return (
+    <Card
+      icon={<Icon size={13} />}
+      title={
+        <>
+          {label}: <span className="text-neutral-400">{task.description}</span>
+        </>
+      }
+      meta={meta}
+      status={task.state === "stopped" ? undefined : item.status}
+    >
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[12px]">
+        {task.summary && (
+          <>
+            <dt className="text-neutral-500">Summary</dt>
+            <dd className="whitespace-pre-wrap break-words text-neutral-300">{task.summary}</dd>
+          </>
+        )}
+        {task.lastTool && (
+          <>
+            <dt className="text-neutral-500">Last tool</dt>
+            <dd className="font-mono text-neutral-300">{task.lastTool}</dd>
+          </>
+        )}
+        <dt className="text-neutral-500">Mode</dt>
+        <dd className="text-neutral-300">{task.backgrounded ? "Background" : "Foreground"}</dd>
+        {task.outputFile && (
+          <>
+            <dt className="text-neutral-500">Output</dt>
+            <dd className="break-all font-mono text-neutral-300">{task.outputFile}</dd>
+          </>
+        )}
+        {task.error && (
+          <>
+            <dt className="text-neutral-500">Error</dt>
+            <dd className="whitespace-pre-wrap break-words text-red-300">{task.error}</dd>
+          </>
+        )}
+      </dl>
     </Card>
   );
 }
