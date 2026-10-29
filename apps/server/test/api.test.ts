@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { nowIso, uuidv7 } from "@workbench/contracts";
+import { MAX_IMAGE_BYTES, nowIso, type UploadedImage, uuidv7 } from "@workbench/contracts";
 import {
   createLogger,
   Database,
@@ -180,8 +180,9 @@ test("the worker link survives a stale socket file and a vanished worker", async
   link.close();
 });
 
-test("conversation images require auth and a stored image reference, and survive source deletion", async () => {
-  const { db, call, login, config } = setup();
+function imageFixture() {
+  const fixture = setup();
+  const { db, config } = fixture;
   const now = nowIso();
   const projectId = uuidv7(),
     workspaceId = uuidv7(),
@@ -226,6 +227,11 @@ test("conversation images require auth and a stored image reference, and survive
     updatedAt: now,
     lastActivityAt: now,
   });
+  return { ...fixture, conversationId, workspaceId, itemId, now };
+}
+
+test("conversation images require auth and a stored image reference, and survive source deletion", async () => {
+  const { db, call, login, config, conversationId, itemId, now } = imageFixture();
   const path = join(config.stateDir, "screen.png");
   const bytes = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==",
@@ -257,4 +263,43 @@ test("conversation images require auth and a stored image reference, and survive
   const replay = await call(url, { cookie });
   assert.equal(replay.status, 200);
   assert.deepEqual(Buffer.from(await replay.arrayBuffer()), bytes);
+});
+
+test("image uploads authenticate, bound and validate bytes, and return immutable agent-readable paths", async () => {
+  const { db, call, login, config, conversationId, workspaceId } = imageFixture();
+  const bytes = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  const url = `/api/conversations/${conversationId}/images`;
+  const upload = (cookie?: string, body: Uint8Array = bytes, extra: Record<string, string> = {}, path = url) =>
+    call(path, {
+      method: "POST",
+      cookie,
+      headers: { origin: ORIGIN, "content-type": "image/png", ...extra },
+      body: new Uint8Array(body),
+    });
+  try {
+    assert.equal((await upload()).status, 401);
+    const cookie = await login();
+    assert.equal((await upload(cookie, bytes, { origin: "https://other.test" })).status, 403);
+    assert.equal((await upload(cookie, bytes, {}, "/api/conversations/missing/images")).status, 404);
+    assert.equal((await upload(cookie, Buffer.from("<svg><script>alert(1)</script></svg>"))).status, 415);
+    assert.equal((await upload(cookie, new Uint8Array())).status, 415);
+    assert.equal((await upload(cookie, Buffer.alloc(MAX_IMAGE_BYTES + 1))).status, 413);
+    const response = await upload(cookie);
+    assert.equal(response.status, 201);
+    const saved = (await response.json()) as UploadedImage;
+    assert.match(saved.mediaId, /^[a-f0-9]{64}\.png$/);
+    assert.equal(saved.path, join(config.stateDir, "media", saved.mediaId));
+    assert.deepEqual(readFileSync(saved.path), bytes);
+    assert.equal(statSync(saved.path).mode & 0o777, 0o600);
+    assert.deepEqual(await (await upload(cookie)).json(), saved);
+    assert.equal(readdirSync(join(config.stateDir, "media")).length, 1);
+    db.run("UPDATE workspaces SET state = 'archived' WHERE id = :id", { id: workspaceId });
+    assert.equal((await upload(cookie)).status, 409);
+  } finally {
+    db.close();
+    rmSync(config.stateDir, { recursive: true, force: true });
+  }
 });

@@ -3,7 +3,7 @@
 import { closeSync, createReadStream, existsSync, openSync, readSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { Readable } from "node:stream";
-import { type AppEvent, commandRequestSchema, commandSchemas } from "@workbench/contracts";
+import { type AppEvent, commandRequestSchema, commandSchemas, MAX_IMAGE_BYTES } from "@workbench/contracts";
 import {
   type Config,
   countUnread,
@@ -40,14 +40,17 @@ import {
 import {
   fileDiff,
   status as gitStatus,
+  imageType,
   markdownImages,
   nextOccurrences,
   portFor,
   readProjectConfig,
   readRetainedImage,
   retainImages,
+  storeImage,
 } from "@workbench/runtime";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
 import type { Auth } from "./auth.ts";
 import type { PushNotifications } from "./notifications.ts";
@@ -154,6 +157,30 @@ export function createApp({ db, config, auth, link, log, previews, notifications
     const run = getRun(db, c.req.param("id"));
     return run ? c.json(run) : c.json({ error: "Run not found." }, 404);
   });
+
+  // The browser sends the file bytes directly; filenames never determine a path.
+  app.post(
+    "/api/conversations/:id/images",
+    bodyLimit({
+      maxSize: MAX_IMAGE_BYTES,
+      onError: (c) => c.json({ error: "Image is larger than 20 MiB." }, 413),
+    }),
+    async (c) => {
+      const conversation = getConversation(db, c.req.param("id"));
+      if (!conversation) return c.json({ error: "Conversation not found." }, 404);
+      const workspace = getWorkspace(db, conversation.workspaceId)!;
+      if (workspace.state === "archived")
+        return c.json({ error: "Restore the workspace before uploading images." }, 409);
+      const bytes = Buffer.from(await c.req.arrayBuffer());
+      if (bytes.length > MAX_IMAGE_BYTES) return c.json({ error: "Image is larger than 20 MiB." }, 413);
+      try {
+        imageType(bytes);
+      } catch (error) {
+        return c.json({ error: (error as Error).message }, 415);
+      }
+      return c.json(storeImage(config.stateDir, bytes), 201);
+    },
+  );
 
   // Only serve image sources actually attached to this stored conversation item.
   app.get("/api/items/:id/image", (c) => {

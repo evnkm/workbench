@@ -453,6 +453,7 @@ export class CodexProvider {
           text: p.text,
           phase: p.mode === "plan" ? "plan" : null,
           reviewTarget: p.reviewTarget,
+          images: retainImages(this.ctx.config.stateDir, w.worktreePath, markdownImages(p.text)),
         },
         createdAt: now,
         updatedAt: now,

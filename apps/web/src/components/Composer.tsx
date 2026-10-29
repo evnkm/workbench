@@ -7,12 +7,13 @@ import {
   type Workspace,
 } from "@workbench/contracts";
 import clsx from "clsx";
-import { ArrowUp, ListPlus, Square, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { ArrowUp, ListPlus, Paperclip, Square, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { sendCommand } from "../lib/api.ts";
 import { navigate } from "../lib/router.ts";
 import { type MenuCommand, parseSlash, slashCommands } from "../lib/slash-commands.ts";
 import { useStore } from "../lib/store.ts";
+import { useImageUpload } from "../lib/use-image-upload.ts";
 import { SlashCommandDialog, type SlashPanel } from "./SlashCommandDialog.tsx";
 import { Dialog } from "./ui.tsx";
 
@@ -34,6 +35,12 @@ export function Composer({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const imageUploaded = useCallback((path: string, name: string) => {
+    const alt = name.replace(/[\\[\]\r\n]/g, " ");
+    setText((draft) => `${draft}${draft ? "\n\n" : ""}![${alt}](<${path.replaceAll(">", "%3E")}>)`);
+  }, []);
+  const images = useImageUpload(conversationId, workspace.state === "ready" && !busy, imageUploaded);
   const worker = useStore((s) => s.worker);
   const providerStatus = worker?.[conversation.provider];
   const agent = PROVIDER_LABELS[conversation.provider];
@@ -149,7 +156,7 @@ export function Composer({
     } else void execute(command);
   };
   const execute = async (command: MenuCommand, args = "") => {
-    if (busy) return;
+    if (busy || images.uploading) return;
     if ("native" in command) return submit(`/${command.name}${args ? ` ${args}` : ""}`);
     setError(null);
     setConfirmation(null);
@@ -333,7 +340,7 @@ export function Composer({
 
   const send = async () => {
     const body = text.trim();
-    if (!body || busy) return;
+    if (!body || busy || images.uploading) return;
     const command = parseSlash(body);
     const match = command && commands.find((c) => c.name === command.query);
     if (match) await execute(match, command.args);
@@ -361,7 +368,27 @@ export function Composer({
 
   return (
     <div className="shrink-0 border-t border-wb-border bg-wb-panel px-3 pb-safe pt-2 md:px-6">
+      {images.dragging && (
+        <div
+          className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center border-4 border-dashed border-sky-400 bg-wb-bg/90"
+          role="status"
+        >
+          <p className="rounded-xl bg-wb-panel px-8 py-6 text-lg text-neutral-100">
+            Drop images to attach to this conversation
+          </p>
+        </div>
+      )}
       <div className="mx-auto max-w-3xl pb-2">
+        {images.status && (
+          <p role="status" className="mb-2 text-[12px] text-neutral-400">
+            {images.status}
+          </p>
+        )}
+        {images.error && (
+          <p role="alert" className="mb-2 whitespace-pre-wrap text-[12px] text-red-300">
+            {images.error}
+          </p>
+        )}
         {(error || disabledReason) && (
           <p role="alert" className="mb-2 text-[12px] text-red-300">
             {error ?? disabledReason}
@@ -465,7 +492,37 @@ export function Composer({
               </div>
             </div>
           )}
+          <input
+            ref={fileInput}
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            multiple
+            className="hidden"
+            aria-label="Choose images"
+            onChange={(event) => {
+              const files = Array.from(event.target.files ?? []);
+              event.target.value = "";
+              void images.uploadFiles(files);
+            }}
+          />
+          <button
+            type="button"
+            aria-label="Attach images"
+            title="Attach images (PNG, JPEG, GIF, WebP · up to 20 MiB each)"
+            disabled={!ready || busy || images.uploading}
+            onClick={() => fileInput.current?.click()}
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-800 disabled:opacity-30"
+          >
+            <Paperclip size={18} />
+          </button>
           <textarea
+            onPaste={(event) => {
+              const files = Array.from(event.clipboardData.files);
+              if (files.length) {
+                event.preventDefault();
+                void images.uploadFiles(files);
+              }
+            }}
             ref={ref}
             value={text}
             rows={1}
@@ -536,7 +593,7 @@ export function Composer({
           <button
             type="button"
             onClick={() => void send()}
-            disabled={!text.trim() || busy || !!disabledReason}
+            disabled={!text.trim() || busy || images.uploading || !!disabledReason}
             aria-label={running ? "Queue message" : "Send"}
             title={running ? "Queue message" : "Send"}
             className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-wb-accent text-neutral-950 disabled:opacity-30"

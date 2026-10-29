@@ -2,10 +2,8 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ConversationImage } from "@workbench/contracts";
+import { type ConversationImage, MAX_IMAGE_BYTES } from "@workbench/contracts";
 import { marked } from "marked";
-
-const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
 export function markdownImages(text: string): ConversationImage[] {
   const images: ConversationImage[] = [];
@@ -44,15 +42,7 @@ export function retainImages(stateDir: string, cwd: string, images: Conversation
         if (!stat.isFile() || stat.size > MAX_IMAGE_BYTES) throw new Error("Image must be a file smaller than 20 MiB.");
         bytes = readFileSync(path);
       }
-      if (bytes.length > MAX_IMAGE_BYTES) throw new Error("Image is larger than 20 MiB.");
-      const extension = imageType(bytes);
-      const mediaId = `${createHash("sha256").update(bytes).digest("hex")}.${extension}`;
-      mkdirSync(join(stateDir, "media"), { recursive: true });
-      try {
-        writeFileSync(join(stateDir, "media", mediaId), bytes, { flag: "wx", mode: 0o600 });
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      }
+      const { mediaId } = storeImage(stateDir, bytes);
       return { source: image.source.startsWith("data:") ? `media:${mediaId}` : image.source, alt: image.alt, mediaId };
     } catch (error) {
       return {
@@ -62,6 +52,21 @@ export function retainImages(stateDir: string, cwd: string, images: Conversation
       };
     }
   });
+}
+
+/** Immutable, content-addressed storage shared by uploads and provider images. */
+export function storeImage(stateDir: string, bytes: Buffer): { path: string; mediaId: string } {
+  if (bytes.length > MAX_IMAGE_BYTES) throw new Error("Image is larger than 20 MiB.");
+  const extension = imageType(bytes);
+  const mediaId = `${createHash("sha256").update(bytes).digest("hex")}.${extension}`;
+  const path = join(stateDir, "media", mediaId);
+  mkdirSync(join(stateDir, "media"), { recursive: true });
+  try {
+    writeFileSync(path, bytes, { flag: "wx", mode: 0o600 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+  return { path, mediaId };
 }
 
 export function readRetainedImage(stateDir: string, mediaId: string): { bytes: Buffer; contentType: string } {

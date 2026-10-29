@@ -15,3 +15,19 @@ Image reads require an authenticated session and an image source referenced by t
 requested item. Historical Markdown images can be retained on their first read.
 The server never fetches remote image URLs and serves only validated raster formats;
 arbitrary file downloads and executable SVG uploads are not part of this boundary.
+
+## Browser uploads
+
+The authenticated, origin-checked conversation image endpoint accepts bounded
+file bytes and stores them through the same immutable media store. File signatures
+select the format; client filenames never select a server path. Content hashes
+deduplicate repeated uploads. Files belong to Workbench state, not temporary
+storage or a Git worktree, so they remain available across worker restarts and
+are included in the existing media backup.
+
+The composer inserts a Markdown image reference with the absolute server path
+into its persistent draft. Sending stays disabled until uploads finish; failed
+files leave the draft intact. User items retain those images through the same
+history-serving boundary as provider images. Agents receive the path as prompt
+text and can inspect the file using their own image tools. A drop or paste uploads
+files but does not submit a turn.

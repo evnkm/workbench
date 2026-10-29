@@ -1,4 +1,11 @@
-import { type Command, type CommandPayload, type CommandType, uuidv7 } from "@workbench/contracts";
+import {
+  type Command,
+  type CommandPayload,
+  type CommandType,
+  MAX_IMAGE_BYTES,
+  type UploadedImage,
+  uuidv7,
+} from "@workbench/contracts";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -56,4 +63,14 @@ export async function sendCommand<T extends CommandType>(
       delay = Math.min(delay * 2, 5000);
     }
   }
+}
+
+export async function uploadImage(conversationId: string, file: File, signal?: AbortSignal): Promise<UploadedImage> {
+  if (file.size > MAX_IMAGE_BYTES) throw new Error("Image is larger than 20 MiB.");
+  return api<UploadedImage>(`/api/conversations/${encodeURIComponent(conversationId)}/images`, {
+    method: "POST",
+    headers: { "Content-Type": file.type || "application/octet-stream" },
+    body: file,
+    signal,
+  });
 }

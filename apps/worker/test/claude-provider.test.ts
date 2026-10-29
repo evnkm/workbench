@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { after, before, test } from "node:test";
 import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { uuidv7 } from "@workbench/contracts";
@@ -263,6 +265,24 @@ test("background tasks keep the turn open and their notifications continue it", 
     error: null,
   });
   assert.equal(items[2]!.data.text, "Research finished.");
+});
+
+test("Claude user messages retain uploaded image references", async () => {
+  const { ctx, conversation, turn, done } = await setup();
+  const id = await conversation();
+  const path = join(ctx.config.stateDir, "photo.png");
+  writeFileSync(
+    path,
+    Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==",
+      "base64",
+    ),
+  );
+  const { runId } = await turn(id, `![Photo](<${path}>)`);
+  await done(runId);
+  const user = listItems(ctx.db, id, null, 100).items.find((i) => i.kind === "user_message")!;
+  assert.equal(user.data.images?.[0]?.source, path);
+  assert.ok(user.data.images?.[0]?.mediaId);
 });
 
 test("approvals and questions persist, validate replies, and accept only the first answer", async () => {

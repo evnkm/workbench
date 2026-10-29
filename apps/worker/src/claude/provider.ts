@@ -330,6 +330,7 @@ export class ClaudeProvider {
         data: {
           text: p.text,
           phase: p.mode === "plan" ? "plan" : null,
+          images: retainImages(this.ctx.config.stateDir, w.worktreePath, markdownImages(p.text)),
         },
         createdAt: now,
         updatedAt: now,

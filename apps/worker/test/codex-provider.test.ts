@@ -53,6 +53,26 @@ test("a turn streams items and records success; the user message is not duplicat
   assert.equal(items[1]!.data.text, "Done.");
 });
 
+test("uploaded paths and retained images survive a Codex user-message echo", async () => {
+  const { ctx, codex, conv } = await setup();
+  const id = await conv();
+  const path = join(ctx.config.stateDir, "photo.png");
+  writeFileSync(
+    path,
+    Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==",
+      "base64",
+    ),
+  );
+  const text = `Inspect this image.\n\n![Photo](<${path}>)`;
+  const { runId } = await codex.submitTurn({ conversationId: id, text, mode: "default" });
+  await waitFor(() => runState(ctx, runId) === "succeeded");
+  const user = listItems(ctx.db, id, null, 100).items.find((i) => i.kind === "user_message")!;
+  assert.equal(user.data.text, text);
+  assert.equal(user.data.images?.[0]?.source, path);
+  assert.ok(user.data.images?.[0]?.mediaId);
+});
+
 test("account model choices validate persistent inference settings and apply them at each turn boundary", async () => {
   const { ctx, codex, conv } = await setup();
   const conversationId = await conv();

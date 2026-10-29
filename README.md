@@ -19,6 +19,12 @@ Local images are retained with conversation state and included in backups; click
 image to open it at full size. Diagrams follow the current appearance and expose their
 source when rendering fails.
 
+Drag photos from Finder anywhere onto an open conversation, paste an image into
+the message box, or use the paperclip button. Workbench uploads PNG, JPEG, GIF,
+and WebP files (up to 20 MiB each) and adds their server paths to your draft.
+Send the message to share those paths with Claude or Codex. Files live in
+`~/.local/share/workbench/media`, survive restarts, and are included in backups.
+
 Use the X on a conversation tab to delete its history. Active or queued runs must
 be stopped first. Deletion syncs to other browsers; job execution history and
 artifacts are retained independently of the conversation.
