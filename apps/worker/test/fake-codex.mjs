@@ -156,7 +156,17 @@ async function runTurn(thread, turn, text, clientId, settings = {}) {
     };
     notify("item/started", { ...t, item: cmd });
     notify("item/commandExecution/outputDelta", { ...t, itemId: cmd.id, delta: "working\n" });
-    return; // waits for turn/interrupt
+    if (text.includes("parallel")) notify("item/started", { ...t, item: { ...cmd, id: id("parallel") } });
+    if (text.includes("boundary"))
+      setTimeout(() => {
+        if (turn.done) return;
+        notify("item/completed", {
+          ...t,
+          item: { ...cmd, status: "completed", aggregatedOutput: "tool finished", exitCode: 0 },
+        });
+        if (text.includes("finish before steer")) finish(thread, turn, "completed");
+      }, 400);
+    return; // waits for steering or turn/interrupt
   }
   const msg = {
     type: "agentMessage",
@@ -310,6 +320,24 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       reply({ turn: { id: turn.id, items: [], status: "inProgress" } });
       th.settings = p;
       void runTurn(th, turn, p.input[0].text, p.clientUserMessageId, p);
+      return;
+    }
+    case "turn/steer": {
+      const th = threads.get(p.threadId);
+      const turn = th?.active;
+      if (!turn || turn.id !== p.expectedTurnId || p.input[0].text.includes("reject steering"))
+        return send({ id: m.id, error: { code: -32600, message: "Active turn does not match" } });
+      const user = {
+        type: "userMessage",
+        id: id("steer"),
+        clientId: p.clientUserMessageId,
+        content: [{ type: "text", text: p.input[0].text, text_elements: [] }],
+      };
+      turn.items.push(user);
+      // Real app-server notifications may precede the RPC acknowledgment.
+      notify("item/started", { threadId: th.id, turnId: turn.id, item: user });
+      notify("item/completed", { threadId: th.id, turnId: turn.id, item: user });
+      reply({ turnId: turn.id });
       return;
     }
     case "turn/interrupt": {

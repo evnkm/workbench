@@ -1,6 +1,6 @@
 import type { Conversation, InspectResult, Run, Workspace } from "@workbench/contracts";
 import clsx from "clsx";
-import { ArrowUp, Square } from "lucide-react";
+import { ArrowUp, ListPlus, Square, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { sendCommand } from "../lib/api.ts";
 import { navigate } from "../lib/router.ts";
@@ -29,6 +29,14 @@ export function Composer({
   const ref = useRef<HTMLTextAreaElement>(null);
   const codex = useStore((s) => s.worker?.codex);
   const detail = useStore((s) => s.conversation);
+  const runs = useStore((s) => s.runs);
+  const otherSessions = Object.values(runs).filter(
+    (run) =>
+      run.kind === "agent_turn" &&
+      run.workspaceId === workspace.id &&
+      run.conversationId !== conversationId &&
+      ["starting", "running", "waiting_for_input", "stopping"].includes(run.state),
+  );
   const [focused, setFocused] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [selected, setSelected] = useState(0);
@@ -66,7 +74,27 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
   }, [text]);
 
-  const running = activeRun !== null;
+  const queued = Object.values(detail?.runs ?? {})
+    .filter((r) => r.state === "queued")
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const delivering = new Set(
+    Object.values(detail?.items ?? {})
+      .filter((i) => i.data.steering)
+      .map((i) => i.runId),
+  );
+  const running = activeRun !== null || queued.length > 0;
+  const [removing, setRemoving] = useState<string | null>(null);
+  const removeQueued = async (run: Run) => {
+    setRemoving(run.id);
+    setError(null);
+    try {
+      await sendCommand("turn.interrupt", { conversationId, runId: run.id });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setRemoving(null);
+    }
+  };
   const ready = workspace.state === "ready";
   const unavailable = codex?.state === "unavailable";
 
@@ -265,7 +293,7 @@ export function Composer({
 
   const send = async () => {
     const body = text.trim();
-    if (!body || running || busy) return;
+    if (!body || busy) return;
     const command = parseSlash(body);
     const match = command && SLASH_COMMANDS.find((c) => c.name === command.query);
     if (match) await execute(match, command.args);
@@ -301,6 +329,44 @@ export function Composer({
           <p role="status" className="mb-2 text-[12px] text-neutral-400">
             {confirmation}
           </p>
+        )}
+        {otherSessions.length > 0 && (
+          <p
+            role="status"
+            className="mb-2 text-[12px] text-amber-200/80"
+            title={otherSessions.map((run) => run.summary).join("\n")}
+          >
+            {otherSessions.length} other {otherSessions.length === 1 ? "session shares" : "sessions share"} this
+            worktree. Coordinate overlapping edits.
+          </p>
+        )}
+        {queued.length > 0 && (
+          <section aria-label="Queued messages" className="mb-2 rounded-lg border border-wb-border px-3 py-2">
+            <p className="text-[12px] text-neutral-400">
+              {queued.length} queued · Next tool boundary, or next turn for mode changes
+            </p>
+            <ol className="max-h-32 overflow-y-auto">
+              {queued.map((run, index) => (
+                <li key={run.id} className="flex items-center gap-2 text-[13px] text-neutral-300">
+                  <span className="text-neutral-500">{index + 1}.</span>
+                  <span className="min-w-0 flex-1 truncate" title={run.summary}>
+                    {run.summary}
+                    {delivering.has(run.id) && <span className="ml-2 text-neutral-500">Delivering…</span>}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`Remove queued message ${index + 1}`}
+                    title="Remove queued message"
+                    disabled={removing !== null || delivering.has(run.id)}
+                    onClick={() => void removeQueued(run)}
+                    className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded hover:bg-neutral-800 disabled:opacity-40"
+                  >
+                    <X size={14} />
+                  </button>
+                </li>
+              ))}
+            </ol>
+          </section>
         )}
         <div className="relative flex items-end gap-2 rounded-xl border border-wb-border-strong bg-wb-bg p-1.5 focus-within:border-neutral-500">
           {menuOpen && (
@@ -391,7 +457,7 @@ export function Composer({
             }}
             placeholder={
               running
-                ? "Codex is working…"
+                ? "Steer Codex at the next tool boundary…"
                 : plan
                   ? "Describe what to plan…"
                   : "Ask Codex to make a change…"
@@ -405,7 +471,7 @@ export function Composer({
             disabled={!ready}
             className="max-h-60 min-h-10 flex-1 resize-none bg-transparent px-2 py-2 text-[16px] leading-snug text-neutral-100 placeholder:text-neutral-600 focus:outline-none md:text-[14px]"
           />
-          {running ? (
+          {activeRun && (
             <button
               type="button"
               onClick={() => void interrupt()}
@@ -416,18 +482,17 @@ export function Composer({
             >
               <Square size={14} fill="currentColor" />
             </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => void send()}
-              disabled={!text.trim() || busy || !!disabledReason}
-              aria-label="Send"
-              title="Send"
-              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-wb-accent text-neutral-950 disabled:opacity-30"
-            >
-              <ArrowUp size={18} />
-            </button>
           )}
+          <button
+            type="button"
+            onClick={() => void send()}
+            disabled={!text.trim() || busy || !!disabledReason}
+            aria-label={running ? "Queue message" : "Send"}
+            title={running ? "Queue message" : "Send"}
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-wb-accent text-neutral-950 disabled:opacity-30"
+          >
+            {running ? <ListPlus size={18} /> : <ArrowUp size={18} />}
+          </button>
         </div>
         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[12px] text-neutral-500">
           <label className="inline-flex min-h-7 items-center gap-1.5">

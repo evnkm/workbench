@@ -31,13 +31,16 @@ export function ConversationView({ workspace }: { workspace: Workspace }) {
   const [atBottom, setAtBottom] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
 
-  const items = useMemo(() => (conv ? sortedItems(conv) : []), [conv]);
+  const items = useMemo(
+    () => (conv ? sortedItems(conv).filter((i) => !i.runId || conv.runs[i.runId]?.state !== "queued") : []),
+    [conv],
+  );
   const runs = useMemo(() => (conv ? Object.values(conv.runs) : []), [conv]);
   const openInputs = useMemo(
     () => (conv ? Object.values(conv.inputs).filter((i) => i.state === "open") : []) as PendingInput[],
     [conv],
   );
-  const activeRun = runs.find((r) => !isTerminalRunState(r.state));
+  const activeRun = runs.find((r) => r.state !== "queued" && !isTerminalRunState(r.state));
   const runEnds = useMemo(() => endMarkers(items, runs), [items, runs]);
 
   // Follow new output only when the reader is already at the bottom.

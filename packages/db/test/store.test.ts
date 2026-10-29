@@ -18,6 +18,7 @@ import {
   insertJobRun,
   latestSeq,
   listArtifacts,
+  listConversationRuns,
   listConversations,
   listProjects,
   resolveInput,
@@ -100,7 +101,7 @@ const run = (conversationId: string, workspaceId: string, state: Run["state"] = 
 
 test("an empty database migrates to the latest version and is idempotent", () => {
   const db = tempDb();
-  assert.equal(db.migrate(), 5);
+  assert.equal(db.migrate(), 6);
   assert.deepEqual(listProjects(db), []);
 });
 
@@ -313,7 +314,10 @@ test("only one active agent turn may exist per conversation", () => {
   const db = tempDb();
   const { conversation, workspace } = seed(db);
   saveRun(db, run(conversation.id, workspace.id, "running"));
-  assert.throws(() => saveRun(db, run(conversation.id, workspace.id, "queued")), /UNIQUE/);
+  saveRun(db, run(conversation.id, workspace.id, "queued"));
+  saveRun(db, run(conversation.id, workspace.id, "queued"));
+  assert.throws(() => saveRun(db, run(conversation.id, workspace.id, "starting")), /UNIQUE/);
+  assert.equal(listConversationRuns(db, conversation.id, 1).length, 3);
   saveRun(db, run(conversation.id, workspace.id, "succeeded"));
 });
 
@@ -323,6 +327,6 @@ test("a backup restores into a separate location", () => {
   const target = join(mkdtempSync(join(tmpdir(), "wb-backup-")), "copy.sqlite");
   db.backupTo(target);
   const restored = new Database(target);
-  assert.equal(restored.migrate(), 5);
+  assert.equal(restored.migrate(), 6);
   assert.equal(listProjects(restored).length, 1);
 });

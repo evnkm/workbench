@@ -10,7 +10,9 @@ import {
   getRun,
   insertCommand,
   listItems,
+  saveItem,
   updateConversation,
+  updateRun,
 } from "@workbench/db";
 import { readRetainedImage } from "@workbench/runtime";
 import { CodexProvider } from "../src/codex/provider.ts";
@@ -92,6 +94,8 @@ test("account model choices validate persistent inference settings and apply the
   assert.equal(planned.serviceTier, "priority");
   assert.equal(planned.collaborationMode.mode, "plan");
   assert.equal(planned.collaborationMode.settings.reasoning_effort, "high");
+  assert.match(planned.collaborationMode.settings.developer_instructions, /session-status.ts/);
+  assert.match(planned.collaborationMode.settings.developer_instructions, /Preserve edits made by other sessions/);
   const running = await codex.submitTurn({ conversationId, text: "hang", mode: "default" });
   await waitFor(() => runState(ctx, running.runId) === "running");
   await codex.configureConversation({ conversationId, approvalPolicy: "never", serviceTier: null });
@@ -211,6 +215,29 @@ test("deleting a completed conversation is durable, idempotent, and rejects subs
   await assert.rejects(codex.submitTurn({ conversationId, text: "hello", mode: "default" }), /Conversation not found/);
 });
 
+test("independently active conversations cannot be deleted until stopped", async () => {
+  const { ctx, codex, conv } = await setup();
+  const [a, b] = [await conv(), await conv()];
+  const first = await codex.submitTurn({ conversationId: a, text: "please approve", mode: "default" });
+  await waitFor(() => runState(ctx, first.runId) === "waiting_for_input");
+  const second = await codex.submitTurn({ conversationId: b, text: "hang", mode: "default" });
+  assert.equal(second.queued, false);
+  await waitFor(() => runState(ctx, second.runId) === "running");
+  for (const conversationId of [a, b]) {
+    await assert.rejects(codex.deleteConversation({ conversationId }), /Stop the active or queued run/);
+    assert.ok(getConversation(ctx.db, conversationId));
+    assert.ok(listItems(ctx.db, conversationId, null, 100).items.length);
+  }
+  await codex.interrupt({ conversationId: b, runId: second.runId });
+  await waitFor(() => runState(ctx, second.runId) === "cancelled");
+  await codex.deleteConversation({ conversationId: b });
+  await codex.interrupt({ conversationId: a, runId: first.runId });
+  await waitFor(() => runState(ctx, first.runId) === "cancelled");
+  await codex.deleteConversation({ conversationId: a });
+  assert.equal(getConversation(ctx.db, a), undefined);
+  assert.equal(getConversation(ctx.db, b), undefined);
+});
+
 test("image completion replay preserves retained screenshots after their temporary file disappears", async () => {
   const { ctx, codex, conv } = await setup();
   const conversationId = await conv();
@@ -278,20 +305,149 @@ test("interrupt reaches the intended turn and a follow-up continues the conversa
   await waitFor(() => runState(ctx, next.runId) === "succeeded");
 });
 
-test("competing turns in one workspace queue and run in order", async () => {
+test("separate conversations share a workspace concurrently and queue only their own follow-ups", async () => {
   const { ctx, codex, conv } = await setup();
   const [a, b] = [await conv(), await conv()];
   const first = await codex.submitTurn({ conversationId: a, text: "hang", mode: "default" });
   await waitFor(() => runState(ctx, first.runId) === "running");
   const second = await codex.submitTurn({ conversationId: b, text: "hello", mode: "default" });
-  assert.equal(second.queued, true);
-  assert.equal(runState(ctx, second.runId), "queued");
-  await assert.rejects(
-    codex.submitTurn({ conversationId: a, text: "again", mode: "default" }),
-    /already active in this conversation/,
-  );
+  assert.equal(second.queued, false);
+  await waitFor(() => runState(ctx, second.runId) === "succeeded");
+  assert.equal(runState(ctx, first.runId), "running");
+  const third = await codex.submitTurn({ conversationId: a, text: "again", mode: "default" });
+  assert.equal(third.queued, true);
   await codex.interrupt({ conversationId: a, runId: first.runId });
   await waitFor(() => runState(ctx, second.runId) === "succeeded");
+  await waitFor(() => runState(ctx, third.runId) === "succeeded");
+});
+
+test("same-conversation follow-ups survive restart, can be removed, and preserve FIFO transcript order", async () => {
+  const { ctx, codex, conv } = await setup();
+  const conversationId = await conv();
+  const active = await codex.submitTurn({ conversationId, text: "hang", mode: "default" });
+  await waitFor(() => runState(ctx, active.runId) === "running");
+  const second = await codex.submitTurn({ conversationId, text: "hello second", mode: "default" });
+  const removed = await codex.submitTurn({ conversationId, text: "never send this", mode: "default" });
+  const third = await codex.submitTurn({ conversationId, text: "hello third", mode: "plan" });
+  assert.equal(second.queued, true);
+  assert.equal(third.queued, true);
+  await codex.interrupt({ conversationId, runId: removed.runId });
+  assert.equal(runState(ctx, removed.runId), "cancelled");
+  assert.equal(runState(ctx, active.runId), "running");
+  await codex.stop();
+  const restarted = new CodexProvider(ctx);
+  providers.push(restarted);
+  await restarted.start();
+  await waitFor(() => runState(ctx, third.runId) === "succeeded");
+  assert.equal(runState(ctx, second.runId), "succeeded");
+  assert.equal(runState(ctx, active.runId), "interrupted");
+  assert.equal(getRun(ctx.db, removed.runId)!.providerTurnId, null);
+  const items = listItems(ctx.db, conversationId, null, 100).items;
+  const secondOutput = items.find((i) => i.runId === second.runId && i.kind === "agent_message")!;
+  const thirdInput = items.find((i) => i.runId === third.runId && i.kind === "user_message")!;
+  assert.ok(secondOutput.position < thirdInput.position);
+  assert.equal(thirdInput.data.phase, "plan");
+  assert.equal(items.filter((i) => i.runId === second.runId && i.kind === "user_message").length, 1);
+});
+
+test("queued messages steer the same running turn after a tool completes, in order and without duplicates", async () => {
+  const { ctx, codex, conv } = await setup();
+  const conversationId = await conv();
+  const active = await codex.submitTurn({ conversationId, text: "hang boundary parallel", mode: "default" });
+  await waitFor(() => listItems(ctx.db, conversationId, null, 100).items.some((i) => i.kind === "command"));
+  const a = await codex.submitTurn({ conversationId, text: "First live instruction", mode: "default" });
+  const b = await codex.submitTurn({ conversationId, text: "Second live instruction", mode: "default" });
+  assert.equal(runState(ctx, a.runId), "queued");
+  assert.equal(runState(ctx, b.runId), "queued");
+  await waitFor(() => runState(ctx, b.runId) === "succeeded");
+  assert.equal(runState(ctx, active.runId), "running");
+  assert.ok(
+    listItems(ctx.db, conversationId, null, 100).items.some((i) => i.kind === "command" && i.status === "in_progress"),
+  );
+  assert.equal(getRun(ctx.db, a.runId)!.providerTurnId, null);
+  const items = listItems(ctx.db, conversationId, null, 100).items;
+  const messages = items.filter((i) => i.kind === "user_message");
+  assert.deepEqual(
+    messages.map((i) => i.data.text),
+    ["hang boundary parallel", "First live instruction", "Second live instruction"],
+  );
+  assert.ok(messages.every((i) => i.runId === active.runId));
+  assert.ok(items.find((i) => i.kind === "command")!.position < messages[1]!.position);
+  assert.equal(getRun(ctx.db, b.runId)!.stopReason, "delivered to live turn");
+  await codex.interrupt({ conversationId, runId: active.runId });
+});
+
+test("a turn ending at the tool boundary leaves the rejected steer for the next turn", async () => {
+  const { ctx, codex, conv } = await setup();
+  const conversationId = await conv();
+  const active = await codex.submitTurn({ conversationId, text: "hang boundary finish before steer", mode: "default" });
+  await waitFor(() => listItems(ctx.db, conversationId, null, 100).items.some((i) => i.kind === "command"));
+  const next = await codex.submitTurn({ conversationId, text: "Next instruction", mode: "default" });
+  await waitFor(() => runState(ctx, next.runId) === "succeeded");
+  assert.equal(runState(ctx, active.runId), "succeeded");
+  assert.notEqual(getRun(ctx.db, active.runId)!.providerTurnId, getRun(ctx.db, next.runId)!.providerTurnId);
+  assert.equal(
+    listItems(ctx.db, conversationId, null, 100).items.filter((i) => i.data.text === "Next instruction").length,
+    1,
+  );
+});
+
+test("live steering preserves a queued mode change instead of ignoring its settings", async () => {
+  const { ctx, codex, conv } = await setup();
+  const conversationId = await conv();
+  const active = await codex.submitTurn({ conversationId, text: "hang boundary", mode: "default" });
+  await waitFor(() => listItems(ctx.db, conversationId, null, 100).items.some((i) => i.kind === "command"));
+  const next = await codex.submitTurn({ conversationId, text: "Plan next work", mode: "plan" });
+  await waitFor(() =>
+    listItems(ctx.db, conversationId, null, 100).items.some((i) => i.kind === "command" && i.status === "completed"),
+  );
+  assert.equal(runState(ctx, next.runId), "queued");
+  await codex.interrupt({ conversationId, runId: active.runId });
+  await waitFor(() => runState(ctx, next.runId) === "succeeded");
+});
+
+test("an unconfirmed live delivery survives restart visibly and is never automatically replayed", async () => {
+  const { ctx, codex, conv } = await setup();
+  const conversationId = await conv();
+  const active = await codex.submitTurn({ conversationId, text: "hang", mode: "default" });
+  await waitFor(() => listItems(ctx.db, conversationId, null, 100).items.some((i) => i.kind === "command"));
+  const queued = await codex.submitTurn({ conversationId, text: "Unconfirmed instruction", mode: "default" });
+  const item = listItems(ctx.db, conversationId, null, 100).items.find((i) => i.runId === queued.runId)!;
+  saveItem(ctx.db, {
+    ...item,
+    data: { ...item.data, steering: { runId: active.runId, turnId: getRun(ctx.db, active.runId)!.providerTurnId! } },
+  });
+  await codex.stop();
+  const restarted = new CodexProvider(ctx);
+  providers.push(restarted);
+  await restarted.start();
+  assert.equal(runState(ctx, queued.runId), "failed");
+  assert.match(getRun(ctx.db, queued.runId)!.error!, /could not be confirmed after restart/);
+  assert.equal(getRun(ctx.db, queued.runId)!.providerTurnId, null);
+  assert.equal(
+    listItems(ctx.db, conversationId, null, 100).items.filter((i) => i.data.text === "Unconfirmed instruction").length,
+    1,
+  );
+  const replay = () =>
+    (
+      restarted as unknown as { onNotification: (method: string, params: Record<string, unknown>) => void }
+    ).onNotification("item/completed", {
+      threadId: getConversation(ctx.db, conversationId)!.providerThreadId,
+      turnId: getRun(ctx.db, active.runId)!.providerTurnId,
+      item: {
+        type: "userMessage",
+        id: "late-confirmation",
+        clientId: item.id,
+        content: [{ type: "text", text: item.data.text, text_elements: [] }],
+      },
+    });
+  replay();
+  assert.equal(runState(ctx, queued.runId), "succeeded");
+  assert.equal(getRun(ctx.db, queued.runId)!.error, null);
+  assert.equal(listItems(ctx.db, conversationId, null, 100).items.find((i) => i.id === item.id)!.runId, active.runId);
+  updateRun(ctx.db, active.runId, { state: "failed", error: "Provider failure" });
+  replay();
+  assert.equal(runState(ctx, active.runId), "failed");
 });
 
 test("a provider failure becomes a failed run with history retained", async () => {

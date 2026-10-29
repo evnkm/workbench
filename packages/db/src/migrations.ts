@@ -231,4 +231,26 @@ CREATE INDEX artifacts_run ON artifacts(run_id);
     sql: `ALTER TABLE conversations ADD COLUMN reasoning_effort TEXT;
 ALTER TABLE conversations ADD COLUMN service_tier TEXT;`,
   },
+  {
+    version: 6,
+    name: "message queues and push delivery",
+    sql: `DROP INDEX runs_one_active_turn;
+CREATE UNIQUE INDEX runs_one_active_turn ON runs(conversation_id)
+  WHERE kind = 'agent_turn' AND state IN ('starting','running','waiting_for_input','stopping');
+CREATE TABLE push_subscriptions (
+  endpoint TEXT PRIMARY KEY,
+  keys TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  session_hash TEXT NOT NULL REFERENCES auth_sessions(token_hash) ON DELETE CASCADE
+);
+CREATE TABLE push_deliveries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  endpoint TEXT NOT NULL REFERENCES push_subscriptions(endpoint) ON DELETE CASCADE,
+  run_id TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at INTEGER NOT NULL,
+  UNIQUE(endpoint, run_id)
+);`,
+  },
 ];

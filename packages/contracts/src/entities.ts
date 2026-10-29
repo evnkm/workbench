@@ -105,6 +105,8 @@ export type ConversationImage = {
 
 /** Kind-specific item payload. Fields are optional because providers differ. */
 export type ItemData = {
+  /** Durable target for a live-turn delivery; prevents replay after an ambiguous restart. */
+  steering?: { runId: string; turnId: string };
   reviewTarget?: ReviewTarget;
   images?: ConversationImage[];
   text?: string;

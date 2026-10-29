@@ -33,6 +33,24 @@ skill/app pickers. Commands requiring the terminal, IDE, or a feature Workbench
 does not yet integrate explain their availability rather than being sent as prompts.
 Paths such as `/home/ubuntu/project` remain ordinary message text.
 
+Independent conversations can run concurrently in the same worktree, including
+Claude alongside Codex. Only messages within one conversation queue. Agents receive
+coordination instructions and a live command to inspect other sessions' tasks and
+recent tools; the composer also shows when other sessions share the worktree.
+Coordination is advisory: use distinct files, preserve each other's changes, and
+use separate worktrees for conflicting edits. Full-access tools cannot guarantee
+isolation inside a shared filesystem.
+
+While Codex is working, use **Queue message** (or Enter on desktop) to submit
+follow-ups. They are stored on the server and delivered in order into the live Codex turn
+as soon as a tool call finishes, using native `turn/steer`. If the turn ends
+first, unsent messages become subsequent turns. Plan-mode changes and reviews
+remain subsequent turns because native steering cannot change turn settings.
+Confirmed messages appear in the live turn’s transcript. Ambiguous delivery
+after a restart is shown as failed with the message retained, rather than
+resending something Codex may already have received. The pending list above the
+message box lets you remove unsent messages; Stop interrupts the current turn.
+
 It started from [the phased implementation plan](IMPLEMENTATION_PLAN.md) and reuses design and workspace ideas from [Canopy](../canopy) (see [NOTICE](NOTICE)).
 
 ## Status

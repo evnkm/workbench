@@ -319,10 +319,16 @@ export const listActiveRuns = (db: Database) =>
 
 export const listConversationRuns = (db: Database, conversationId: string, limit = 200) =>
   db
-    .all<Row>("SELECT * FROM runs WHERE conversation_id = :c ORDER BY created_at DESC LIMIT :limit", {
-      c: conversationId,
-      limit,
-    })
+    .all<Row>(
+      `SELECT * FROM runs WHERE conversation_id = :c AND (
+       state NOT IN ('succeeded','failed','cancelled','interrupted') OR id IN (
+         SELECT id FROM runs WHERE conversation_id = :c ORDER BY created_at DESC, rowid DESC LIMIT :limit
+       )) ORDER BY created_at DESC, rowid DESC`,
+      {
+        c: conversationId,
+        limit,
+      },
+    )
     .map(toRun)
     .reverse();
 

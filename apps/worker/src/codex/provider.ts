@@ -23,6 +23,7 @@ import {
   getItemByProviderId,
   getRun,
   getWorkspace,
+  latestSeq,
   listActiveRuns,
   resolveInput,
   saveConversation,
@@ -32,11 +33,13 @@ import {
   updateRun,
 } from "@workbench/db";
 import { markdownImages, retainImages } from "@workbench/runtime";
+import { claimQueuedTurn, conversationBusy } from "../agent-queue.ts";
 import { CommandError, type Handlers } from "../commands.ts";
 import type { WorkerContext } from "../context.ts";
 import { saveFork } from "../fork.ts";
+import { sessionInstructions } from "../session-context.ts";
 import { exec, sleep } from "../util.ts";
-import { AppServer } from "./appserver.ts";
+import { AppServer, RpcError } from "./appserver.ts";
 import { MAX_OUTPUT_CHARS, mapItem, mapServerRequest, replyFor, runStateForTurn } from "./mapping.ts";
 import { readMenu, readModels } from "./menu.ts";
 import type { RequestId } from "./protocol/RequestId.ts";
@@ -49,6 +52,8 @@ import type { TurnStartResponse } from "./protocol/v2/TurnStartResponse.ts";
 import { CODEX_PROTOCOL_VERSION } from "./protocol/version.ts";
 
 const DELTA_FLUSH_MS = 100;
+const TOOL_KINDS = new Set(["command", "file_change", "tool_call", "web_search", "image", "other"]);
+const isToolItem = (item: ThreadItem) => TOOL_KINDS.has(mapItem(item, true).kind);
 const ACTIVE_AGENT_STATES = new Set(["starting", "running", "waiting_for_input", "stopping"]);
 
 type CodexState = { state: "starting" | "ready" | "unavailable"; version: string | null; error: string | null };
@@ -73,6 +78,7 @@ export class CodexProvider {
   /** Thread id → run id for a turn/start whose response has not arrived. */
   private pendingStarts = new Map<string, string>();
   private interruptRequested = new Set<string>();
+  private steering = new Map<string, string>();
   /** Pending input id → the app-server request it answers. */
   private inputRoutes = new Map<string, { generation: number; rpcId: RequestId }>();
   /** In-progress items, keyed by `${conversationId}:${providerItemId}`. */
@@ -268,13 +274,23 @@ export class CodexProvider {
       cancelOpenInputsForRun(db, run.id);
       if (run.providerTurnId) this.turnRuns.delete(run.providerTurnId);
     }
+    // Replayed provider user items above confirm delivery. Anything still marked
+    // in-flight is ambiguous: preserve the text visibly, but never send it twice.
+    for (const row of db.all<{ id: string }>(`SELECT r.id FROM runs r JOIN items i ON i.run_id = r.id
+      WHERE r.state = 'queued' AND json_extract(i.data, '$.steering') IS NOT NULL`)) {
+      updateRun(db, row.id, {
+        state: "failed",
+        endedAt: nowIso(),
+        error: "Live message delivery could not be confirmed after restart. Check the conversation before resending.",
+      });
+    }
     this.ctx.published();
-    const workspaces = new Set(
+    const conversations = new Set(
       listActiveRuns(db)
-        .filter((r) => r.state === "queued" && r.workspaceId)
-        .map((r) => r.workspaceId!),
+        .filter((r) => r.state === "queued" && r.conversationId)
+        .map((r) => r.conversationId!),
     );
-    for (const w of workspaces) this.drainQueue(w);
+    for (const id of conversations) this.drainQueue(id);
   }
 
   async stop() {
@@ -394,12 +410,6 @@ export class CodexProvider {
     return { conversationId: conv.id };
   }
 
-  private workspaceBusy(workspaceId: string, exceptRun?: string) {
-    return listActiveRuns(this.ctx.db).some(
-      (r) => r.kind === "agent_turn" && r.workspaceId === workspaceId && r.state !== "queued" && r.id !== exceptRun,
-    );
-  }
-
   async submitTurn(p: CommandPayload<"turn.start">) {
     const db = this.ctx.db;
     const conv = this.requireConversation(p.conversationId);
@@ -408,7 +418,7 @@ export class CodexProvider {
     if (this.status.state === "unavailable" && !this.server?.alive) {
       throw new CommandError(`Codex is unavailable: ${this.status.error ?? "unknown error"}`);
     }
-    const queued = this.workspaceBusy(w.id);
+    const queued = conversationBusy(this.ctx, conv.id);
     const now = nowIso();
     const run: Run = {
       id: uuidv7(),
@@ -426,37 +436,31 @@ export class CodexProvider {
       startedAt: null,
       endedAt: null,
     };
-    try {
-      db.tx(() => {
-        saveRun(db, run, this.ctx.instanceId);
-        saveItem(db, {
-          id: uuidv7(),
-          conversationId: conv.id,
-          runId: run.id,
-          providerItemId: null,
-          kind: "user_message",
-          status: "completed",
-          data: {
-            text: p.text,
-            phase: p.mode === "plan" ? "plan" : null,
-            reviewTarget: p.reviewTarget,
-          },
-          createdAt: now,
-          updatedAt: now,
-        });
-        updateConversation(db, conv.id, {
-          lastActivityAt: now,
-          title: conv.title === "New conversation" ? p.text.replace(/\s+/g, " ").slice(0, 60) : conv.title,
-        });
+    db.tx(() => {
+      saveRun(db, run, this.ctx.instanceId);
+      saveItem(db, {
+        id: uuidv7(),
+        conversationId: conv.id,
+        runId: run.id,
+        providerItemId: null,
+        kind: "user_message",
+        status: "completed",
+        data: {
+          text: p.text,
+          phase: p.mode === "plan" ? "plan" : null,
+          reviewTarget: p.reviewTarget,
+        },
+        createdAt: now,
+        updatedAt: now,
       });
-    } catch (e) {
-      if (String((e as Error).message).includes("UNIQUE")) {
-        throw new CommandError("A turn is already active in this conversation. Wait for it or interrupt it.");
-      }
-      throw e;
-    }
+      updateConversation(db, conv.id, {
+        lastActivityAt: now,
+        title: conv.title === "New conversation" ? p.text.replace(/\s+/g, " ").slice(0, 60) : conv.title,
+      });
+    });
     this.ctx.published();
     if (!queued) void this.startTurn(run.id);
+    else void this.steerQueue(conv.id);
     return { runId: run.id, queued };
   }
 
@@ -469,6 +473,7 @@ export class CodexProvider {
       config: conv.reasoningEffort ? { model_reasoning_effort: conv.reasoningEffort } : undefined,
       approvalPolicy: conv.approvalPolicy,
       sandbox: "danger-full-access" as const,
+      developerInstructions: sessionInstructions(this.ctx, w.id, conv.id),
     };
     if (!conv.providerThreadId) {
       const r = await server.request<ThreadStartResponse>("thread/start", {
@@ -519,7 +524,7 @@ export class CodexProvider {
           settings: {
             model: fresh.model,
             reasoning_effort: fresh.reasoningEffort,
-            developer_instructions: null,
+            developer_instructions: sessionInstructions(this.ctx, w.id, conv.id),
           },
         },
       };
@@ -554,7 +559,7 @@ export class CodexProvider {
         });
         this.ctx.published();
       }
-      this.drainQueue(w.id);
+      this.drainQueue(conv.id);
     } finally {
       if (threadId && this.pendingStarts.get(threadId) === runId) this.pendingStarts.delete(threadId);
     }
@@ -572,16 +577,106 @@ export class CodexProvider {
     this.ctx.published();
   }
 
-  private drainQueue(workspaceId: string) {
-    if (this.workspaceBusy(workspaceId)) return;
-    const next = this.ctx.db.get<{ id: string }>(
-      `SELECT id FROM runs WHERE workspace_id = :w AND kind = 'agent_turn' AND state = 'queued' ORDER BY created_at LIMIT 1`,
-      { w: workspaceId },
+  private drainQueue(conversationId: string) {
+    if (this.stopped || this.steering.has(conversationId)) return;
+    const next = claimQueuedTurn(this.ctx, conversationId);
+    if (!next) return;
+    this.ctx.published();
+    void this.startTurn(next);
+  }
+
+  private consumeSteer(queuedId: string, activeId: string, itemId: string) {
+    const db = this.ctx.db;
+    if (queuedId === activeId) return;
+    const pending = getRun(db, queuedId);
+    if (!pending || (pending.state !== "queued" && pending.state !== "failed")) return;
+    db.tx(() => {
+      db.run("UPDATE items SET run_id = :active, position = :position WHERE id = :id", {
+        active: activeId,
+        position: latestSeq(db) + 1,
+        id: itemId,
+      });
+      saveItem(db, getItem(db, itemId)!);
+      updateRun(db, queuedId, {
+        state: "succeeded",
+        endedAt: nowIso(),
+        error: null,
+        stopReason: "delivered to live turn",
+      });
+    });
+    this.ctx.published();
+  }
+
+  private async steerQueue(conversationId: string, atBoundary = false) {
+    const db = this.ctx.db;
+    const conv = getConversation(db, conversationId);
+    if (!conv?.providerThreadId || !this.server?.alive || this.stopped || this.steering.has(conv.id)) return;
+    const active = listActiveRuns(db).find((r) => r.conversationId === conv.id && r.state === "running");
+    if (!active?.providerTurnId) return;
+    // While a tool is running, keep messages cancellable in the durable queue.
+    if (!atBoundary && [...this.liveItems.values()].some((i) => i.runId === active.id && TOOL_KINDS.has(i.kind)))
+      return;
+    const next = db.get<{ id: string }>(
+      `SELECT id FROM runs WHERE conversation_id = :id
+      AND kind = 'agent_turn' AND state = 'queued' ORDER BY created_at, rowid LIMIT 1`,
+      { id: conv.id },
     );
     if (!next) return;
-    updateRun(this.ctx.db, next.id, { state: "starting" });
+    const user = db.get<{ id: string }>("SELECT id FROM items WHERE run_id = :id AND kind = 'user_message'", {
+      id: next.id,
+    });
+    const item = user ? getItem(db, user.id) : undefined;
+    const original = db.get<{ id: string }>(
+      "SELECT id FROM items WHERE run_id = :id AND kind = 'user_message' ORDER BY position LIMIT 1",
+      { id: active.id },
+    );
+    const initial = original ? getItem(db, original.id) : undefined;
+    if (!item || !initial) throw new Error("Agent turn is missing its user message");
+    // Plan and review settings cannot be changed through turn/steer.
+    if (item.data.reviewTarget || initial.data.reviewTarget || item.data.phase !== initial.data.phase) return;
+    this.steering.set(conv.id, next.id);
+    saveItem(db, { ...item, data: { ...item.data, steering: { runId: active.id, turnId: active.providerTurnId } } });
     this.ctx.published();
-    void this.startTurn(next.id);
+    try {
+      const result = await this.server.request<{ turnId: string }>(
+        "turn/steer",
+        {
+          threadId: conv.providerThreadId,
+          expectedTurnId: active.providerTurnId,
+          clientUserMessageId: item.id,
+          input: [{ type: "text", text: item.data.text!, text_elements: [] }],
+        },
+        15_000,
+      );
+      if (result.turnId !== active.providerTurnId) throw new Error("Codex acknowledged a different turn");
+      this.consumeSteer(next.id, active.id, item.id);
+    } catch (error) {
+      if (getRun(db, next.id)?.state === "queued") {
+        if (error instanceof RpcError) {
+          const { steering: _target, ...data } = getItem(db, item.id)!.data;
+          saveItem(db, { ...getItem(db, item.id)!, data });
+          if (!isTerminalRunState(getRun(db, active.id)!.state))
+            this.notice(
+              conv,
+              active.id,
+              `Live delivery was rejected; your message is still queued: ${error.message}`,
+              true,
+            );
+        } else {
+          updateRun(db, next.id, {
+            state: "failed",
+            endedAt: nowIso(),
+            error: "Live message delivery could not be confirmed. Check the conversation before resending.",
+          });
+        }
+        this.ctx.published();
+      }
+    } finally {
+      this.steering.delete(conv.id);
+      this.drainQueue(conv.id);
+    }
+    // Drain accepted messages in submission order without waiting for another tool.
+    if (getRun(db, next.id)?.state === "succeeded") void this.steerQueue(conv.id, true);
   }
 
   async interrupt(p: { conversationId: string; runId: string }) {
@@ -589,6 +684,8 @@ export class CodexProvider {
     if (!run || run.conversationId !== p.conversationId) throw new CommandError("Run not found in this conversation.");
     if (isTerminalRunState(run.state)) throw new CommandError(`This turn already ended (${run.state}).`);
     if (run.state === "queued") {
+      if ([...this.steering.values()].includes(run.id))
+        throw new CommandError("This message is being delivered to the live turn. Wait for delivery to finish.");
       updateRun(this.ctx.db, run.id, { state: "cancelled", endedAt: nowIso(), stopReason: "cancelled while queued" });
       this.ctx.published();
       return { runId: run.id, state: "cancelled" };
@@ -682,6 +779,7 @@ export class CodexProvider {
       case "item/started":
       case "item/completed":
         this.upsertItem(conv, runId, params.item as ThreadItem, method === "item/completed");
+        if (method === "item/completed" && isToolItem(params.item as ThreadItem)) void this.steerQueue(conv.id, true);
         break;
       case "item/agentMessage/delta":
       case "item/reasoning/summaryTextDelta":
@@ -761,7 +859,10 @@ export class CodexProvider {
     // The user message we stored at submission comes back with our id as clientId.
     if (!existing && mapped.clientId) {
       const mine = getItem(db, mapped.clientId);
-      if (mine && mine.conversationId === conv.id) existing = mine;
+      if (mine && mine.conversationId === conv.id) {
+        if (runId && mine.data.steering?.runId === runId && mine.runId) this.consumeSteer(mine.runId, runId, mine.id);
+        existing = getItem(db, mine.id);
+      }
     }
     if (completed) {
       const images = [...(mapped.data.images ?? []), ...markdownImages(mapped.data.text ?? "")].map((image) => {
@@ -852,7 +953,7 @@ export class CodexProvider {
     this.turnRuns.delete(turn.id);
     for (const [k, v] of this.liveItems) if (v.runId === runId && v.kind !== "command") this.liveItems.delete(k);
     this.ctx.published();
-    this.drainQueue(conv.workspaceId);
+    this.drainQueue(conv.id);
   }
 
   // ------------------------------------------------------------ server requests
