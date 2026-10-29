@@ -3,7 +3,7 @@ import { useSyncExternalStore } from "react";
 
 export type Route =
   | { name: "home" }
-  | { name: "apps"; app: string | null }
+  | { name: "apps"; app: string | null; section?: string }
   | { name: "workspace"; workspaceId: string; conversationId: string | null; pane: Pane }
   | { name: "jobs"; runId: string | null }
   | { name: "settings" };
@@ -19,7 +19,7 @@ export function parse(path: string): Route {
     const pane = PANES.includes(rest as Pane) ? (rest as Pane) : "conversation";
     return { name: "workspace", workspaceId: parts[1], conversationId, pane };
   }
-  if (parts[0] === "apps") return { name: "apps", app: parts[1] ?? null };
+  if (parts[0] === "apps") return { name: "apps", app: parts[1] ?? null, ...(parts[2] ? { section: parts[2] } : {}) };
   if (parts[0] === "jobs") return { name: "jobs", runId: parts[1] ?? null };
   if (parts[0] === "settings") return { name: "settings" };
   return { name: "home" };
@@ -30,7 +30,7 @@ export function href(r: Route): string {
     case "home":
       return "/";
     case "apps":
-      return r.app ? `/apps/${r.app}` : "/apps";
+      return r.app ? `/apps/${r.app}${r.section ? `/${r.section}` : ""}` : "/apps";
     case "jobs":
       return r.runId ? `/jobs/${r.runId}` : "/jobs";
     case "settings":

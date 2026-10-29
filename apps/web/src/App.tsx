@@ -89,7 +89,9 @@ function Shell() {
         : route.name === "apps"
           ? route.app === "rolodex"
             ? "Rolodex"
-            : "Mini-apps"
+            : route.app === "pokerbot"
+              ? "Pokerbot"
+              : "Mini-apps"
           : "Workbench";
   const subtitle = route.name === "workspace" && workspace ? projects[workspace.projectId]?.name : null;
 
@@ -146,7 +148,7 @@ function Shell() {
             )
           ) : route.name === "apps" ? (
             <Suspense fallback={null}>
-              <MiniAppsView app={route.app} />
+              <MiniAppsView app={route.app} section={route.section} />
             </Suspense>
           ) : route.name === "jobs" ? (
             <Suspense fallback={null}>

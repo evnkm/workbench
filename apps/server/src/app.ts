@@ -113,13 +113,14 @@ export function createApp({ db, config, auth, link, log, previews, notifications
     const { method } = c.req;
     if (
       !(
-        (method === "GET" && ["/rolodex/state", "/rolodex/events"].includes(path)) ||
+        (method === "GET" && ["/rolodex/state", "/rolodex/events", "/pokerbot/state"].includes(path)) ||
         (method === "POST" &&
-          (path === "/rolodex/messages" || /^\/rolodex\/messages\/[a-f0-9-]+\/resolve$/.test(path)))
+          (path === "/rolodex/messages" || /^\/rolodex\/messages\/[a-f0-9-]+\/resolve$/.test(path))) ||
+        ((method === "PUT" || method === "DELETE") && /^\/pokerbot\/records\/[a-z0-9-]{1,64}$/.test(path))
       )
     )
       return c.json({ error: "Not found." }, 404);
-    const body = method === "POST" ? await c.req.text() : undefined;
+    const body = method === "POST" || method === "PUT" ? await c.req.text() : undefined;
     if (body && Buffer.byteLength(body) > 32_000) return c.json({ error: "The request is too long." }, 413);
     try {
       const response = await fetch(`http://127.0.0.1:4312${path}`, {

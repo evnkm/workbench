@@ -19,22 +19,32 @@ import {
   Plus,
   Search,
   Send,
+  Spade,
   Users,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api.ts";
 import { navigate } from "../lib/router.ts";
+import { Pokerbot } from "./PokerbotView.tsx";
 import { type GraphActions, personColor, RolodexGraph } from "./RolodexGraph.tsx";
 import { Button, ErrorText, IconButton } from "./ui.tsx";
 
 const endpoint = "/api/apps/rolodex";
 const APPS = [
   { id: "rolodex", name: "Rolodex", description: "People you know and how they are connected", Icon: Network },
+  {
+    id: "pokerbot",
+    name: "Pokerbot",
+    description: "Experiments, bots, matchups and reading for No Limit",
+    Icon: Spade,
+  },
 ];
-export function MiniAppsView({ app }: { app: string | null }) {
+export function MiniAppsView({ app, section }: { app: string | null; section?: string }) {
   return app === "rolodex" ? (
     <Rolodex />
+  ) : app === "pokerbot" ? (
+    <Pokerbot section={section} />
   ) : (
     <div className="h-full overflow-y-auto p-4 md:p-8">
       <div className="mx-auto max-w-2xl">

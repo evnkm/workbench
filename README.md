@@ -91,6 +91,13 @@ changes from that note are committed. You can match an existing person, create
 a separate person with the same name, or cancel the note. Corrections preserve
 unrelated facts; explicit name corrections retain the old name as an alias.
 
+Pokerbot tracks bot development for Sequoia's No Limit tournament: experiments,
+bots, logged matches, a reading list of algorithms, and the 60-minute build plan.
+A match records each seat's net chips (zero-sum, checked on save) and optionally
+its per-hand standard deviation; results are shown in mbb/hand at the event's
+50/100 blinds, pooled per pairing, and greyed while inside their 95% interval.
+Bots and experiments that matches refer to cannot be deleted; retire a bot instead.
+
 Mini-apps run in `workbench-miniapps.service` on loopback port 4312 behind
 Workbench's authenticated `/api/apps/*` proxy, which allows each app's routes
 explicitly. The host uses its own local credential and keeps each app's state in

@@ -9,12 +9,14 @@ import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import { interpret } from "./agent.ts";
+import { mountPokerbot, PokerbotStore } from "./pokerbot.ts";
 import { RolodexStore } from "./store.ts";
 
 const config = loadConfig();
 const log = createLogger("miniapps", config.logLevel);
 const store = new RolodexStore(join(config.stateDir, "miniapps/rolodex/rolodex.sqlite"));
 store.recover();
+const pokerbot = new PokerbotStore(join(config.stateDir, "miniapps/pokerbot/pokerbot.sqlite"));
 const app = new Hono();
 const token = miniAppHostToken(config.stateDir);
 app.use("*", async (c, next) => {
@@ -24,6 +26,7 @@ app.use("*", async (c, next) => {
 app.use("*", bodyLimit({ maxSize: 32_000 }));
 app.onError((error, c) => c.json({ error: error instanceof z.ZodError ? z.prettifyError(error) : error.message }, 400));
 app.get("/health", (c) => c.json({ ok: true }));
+mountPokerbot(app, pokerbot);
 app.get("/rolodex/state", (c) => {
   c.header("Cache-Control", "no-store");
   return c.json(store.state());
@@ -86,6 +89,7 @@ for (const signal of ["SIGTERM", "SIGINT"])
     clearInterval(timer);
     server.close();
     // systemd kills the service cgroup, including outstanding native CLI children.
+    pokerbot.db.close();
     if (!working) {
       store.db.close();
       process.exit(0);
