@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { createLogger, Database, loadConfig, pruneAuthSessions } from "@workbench/db";
+import type { Context } from "hono";
 import { createApp } from "./app.ts";
 import { Auth } from "./auth.ts";
 import { Previews } from "./previews.ts";
@@ -34,13 +35,18 @@ if (existsSync(config.webDist)) {
       },
     }),
   );
-  app.use("/*", serveStatic({ root: config.webDist }));
-  app.get("*", (c) => {
-    if (c.req.path.startsWith("/api/")) return c.json({ error: "Not found." }, 404);
+  // A stale page asking for a deleted chunk must get a 404, not index.html as JavaScript.
+  app.get("/assets/*", (c) => c.text("Not found.", 404));
+  const index = (c: Context) => {
     c.header("Cache-Control", "no-cache");
     // Read per request so a rebuilt bundle never pairs with a stale index.
     return c.html(readFileSync(join(config.webDist, "index.html"), "utf8"));
-  });
+  };
+  // The index is never served by serveStatic, which would let browsers cache it heuristically.
+  app.get("/", index);
+  app.get("/index.html", index);
+  app.use("/*", serveStatic({ root: config.webDist }));
+  app.get("*", (c) => (c.req.path.startsWith("/api/") ? c.json({ error: "Not found." }, 404) : index(c)));
 } else {
   log.warn("web assets not built; serving the API only", { webDist: config.webDist });
 }

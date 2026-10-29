@@ -1,6 +1,7 @@
 // JSON-RPC client for one `codex app-server` child process over stdio.
 import { type ChildProcess, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 import type { Logger } from "@workbench/db";
 import type { RequestId } from "./protocol/RequestId.ts";
@@ -55,7 +56,13 @@ export class AppServer extends EventEmitter<AppServerEvents> {
   }
 
   async start(): Promise<{ userAgent: string }> {
-    const child = spawn(this.bin, ["app-server"], { stdio: ["pipe", "pipe", "pipe"], env: process.env });
+    const child = spawn(this.bin, ["app-server"], {
+      // Codex resolves its working directory while loading config. The worker's own cwd is a
+      // release directory that a later deploy can prune, so run from a directory that persists.
+      cwd: homedir(),
+      stdio: ["pipe", "pipe", "pipe"],
+      env: process.env,
+    });
     this.child = child;
     child.on("exit", (code, signal) => {
       this.exited = true;

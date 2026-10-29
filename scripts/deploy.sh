@@ -36,14 +36,19 @@ else
   dest=$RELEASES/$id
   echo "Building release $id"
   rsync -a --delete --exclude node_modules --exclude .workbench --exclude dist --exclude .git "$SRC/" "$dest/"
-  (cd "$dest" && npm ci --no-audit --no-fund --loglevel=error && npm run build --silent)
+  (cd "$dest" && npm ci --include=dev --no-audit --no-fund --loglevel=error && npm run build --silent)
   # Verify before switching: types and the fast test suite.
   (cd "$dest" && npx tsc -p tsconfig.json && npx tsc -p apps/web)
   if [[ -L $STATE/current ]]; then ln -sfn "$(readlink -f "$STATE/current")" "$STATE/previous"; fi
   ln -sfn "$dest" "$STATE/current"
   echo "Switched current -> $id"
-  # Keep the five newest releases plus whatever current/previous point at.
-  keep=$(readlink -f "$STATE/current"; readlink -f "$STATE/previous" 2>/dev/null || true)
+  # Keep the five newest releases, whatever current/previous point at, and any release a
+  # running service still runs from (the worker stays on its release unless --worker).
+  keep=$(readlink -f "$STATE/current"; readlink -f "$STATE/previous" 2>/dev/null || true
+    for svc in workbench-server workbench-worker; do
+      pid=$(systemctl show -p MainPID --value "$svc" 2>/dev/null || true)
+      [[ -n $pid && $pid != 0 ]] && readlink "/proc/$pid/cwd" 2>/dev/null | sed 's/ (deleted)$//' || true
+    done)
   ls -1dt "$RELEASES"/*/ | tail -n +6 | while read -r old; do
     old=${old%/}
     grep -qxF "$old" <<<"$keep" || rm -rf "$old"
